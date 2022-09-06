@@ -92,6 +92,16 @@ where
         self.index == None
     }
 
+    pub fn seek_front(&mut self) {
+        self.cur = None;
+        self.index = None;
+    }
+    
+    pub fn seek_back(&mut self) {
+        self.cur = self.list.back;
+        self.index = self.cur.map(|_| self.list.len - 1);
+    }
+
     /// Seek the cursor forward a single step, jumping to start if we are at the ghost element
     pub fn seek_forward(&mut self) {
         if let Some(cur) = self.cur {
@@ -131,6 +141,9 @@ where
     }
 
     pub fn seek_forward_until(&mut self, elem: T) {
+        if self.cur.is_none() {
+            self.seek_forward();
+        }
         while let Some(cur_el) = self.peek() {
             if *cur_el == elem {
                 return;
@@ -140,6 +153,9 @@ where
     }
 
     pub fn seek_backward_until(&mut self, elem: T) {
+        if self.cur.is_none() {
+            self.seek_backward();
+        }
         while let Some(cur_el) = self.peek() {
             if *cur_el == elem {
                 return;
@@ -347,6 +363,8 @@ mod test {
         assert_eq!(list.pop_front(), Some(1));
         assert_eq!(list.pop_front(), None);
         assert_eq!(list.len(), 0);
+        assert_eq!(list.peek_front(), None);
+        assert_eq!(list.peek_back(), None);
     }
 
     #[test]
@@ -375,8 +393,46 @@ mod test {
         // 5,4,3|2,1
         c.push_after(2);
 
+        // 5,4,3,2,1|0
+        c.seek_forward();
+        c.seek_forward();
+        c.push_after(0);
+
         assert_eq!(list.peek_front(), Some(&5));
-        assert_eq!(list.peek_back(), Some(&1));
-        assert!(list.into_iter().eq(vec![5,4,3,2,1]));
+        assert_eq!(list.peek_back(), Some(&0));
+        assert!(list.into_iter().eq(vec![5,4,3,2,1,0]));
+    }
+
+    #[test]
+    fn test_cursor_complex() {
+        let mut list = LinkedList::<i32>::new();
+        let mut c = list.cursor_mut();
+
+        // |1
+        c.seek_backward();
+        c.seek_backward();
+        c.push_after(1);
+
+        // |
+        assert_eq!(c.pop_after(), Some(1));
+
+        // |1,2,3
+        c.push_after(3);
+        c.push_after(2);
+        c.push_after(1);
+
+        // 1,2,3|4
+        c.seek_forward_until(3);
+        assert_eq!(c.peek(), Some(&3));
+        c.push_after(4);
+
+        // 1|2,3,4
+        c.seek_backward_until(1);
+        assert_eq!(c.peek(), Some(&1));
+        c.seek_front();
+        c.push_after(0);
+        assert_eq!(list.peek_front(), Some(&0));
+        assert_eq!(list.peek_back(), Some(&4));
+        assert!(list.into_iter().eq(vec![0,1,2,3,4]));    
     }
 }
