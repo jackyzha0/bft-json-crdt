@@ -1,32 +1,43 @@
-use std::{marker::PhantomData, ptr::NonNull};
+use std::{marker::PhantomData, ptr::NonNull, borrow::BorrowMut};
 
 /// Heavily inspired by https://rust-unofficial.github.io/too-many-lists/sixth-basics.html
 /// An unsafe doubly-linked list
 pub struct LinkedList<T: Eq> {
-    front: Ref<T>,
-    back: Ref<T>,
+    front: Option<Ref<T>>,
+    back: Option<Ref<T>>,
     len: usize,
 
     // tell compiler we actually do store things of type `T`
     _phantom: PhantomData<T>,
 }
 
-struct Node<T> {
-    next: Ref<T>,
-    prev: Ref<T>,
+pub struct Node<T> {
+    next: Option<Ref<T>>,
+    prev: Option<Ref<T>>,
     elem: T,
 }
 
+impl<T> Node<T> {
+    pub fn elem(&self) -> &T {
+        &self.elem
+    }
+}
+
 pub struct CursorMut<'a, T: Eq> {
-    cur: Ref<T>,
+    cur: Option<Ref<T>>,
     list: &'a mut LinkedList<T>,
     index: Option<usize>,
 }
 
-/// Optional non-null raw pointer to a Node<T>
-type Ref<T> = Option<NonNull<Node<T>>>;
+pub struct Cursor<'a, T: Eq> {
+    cur: Option<Ref<T>>,
+    list: &'a LinkedList<T>,
+    index: Option<usize>,
+}
 
-fn box_node<T>(node: Node<T>) -> NonNull<Node<T>> {
+/// Non-null raw pointer to a Node<T>
+pub type Ref<T> = NonNull<Node<T>>;
+fn box_node<T>(node: Node<T>) -> Ref<T> { 
     unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(node))) }
 }
 
@@ -66,6 +77,18 @@ where
             index: None,
         }
     }
+    
+    pub fn cursor(&self) -> Cursor<T> {
+        Cursor {
+            list: self,
+            cur: None,
+            index: None,
+        }
+    }
+
+    pub fn mut_cursor_from_ref_idx(&mut self, cur: Option<Ref<T>>, index: Option<usize>) -> CursorMut<T> {
+        CursorMut { cur, list: self, index }
+    }
 
     pub fn pop_front(&mut self) -> Option<T> {
         self.cursor_mut().pop_after()
@@ -77,6 +100,96 @@ where
 
     pub fn into_iter(self) -> IntoIter<T> {
         IntoIter(self)
+    }
+}
+
+impl<'a, T> Cursor<'a, T> where T: Eq {
+    pub fn raw_ref(&self) -> Option<Ref<T>> {
+        self.cur
+    }
+
+    pub fn index(&self) -> Option<usize> {
+        self.index
+    }
+
+    pub fn at_end(&self) -> bool {
+        self.index == None
+    }
+
+    pub fn seek_front(&mut self) {
+        self.cur = None;
+        self.index = None;
+    }
+    
+    pub fn seek_back(&mut self) {
+        self.cur = self.list.back;
+        self.index = self.cur.map(|_| self.list.len - 1);
+    }
+
+    /// Seek the cursor forward a single step, jumping to start if we are at the ghost element
+    pub fn seek_forward(&mut self) {
+        if let Some(cur) = self.cur {
+            unsafe {
+                // move to next ref
+                self.cur = (*cur.as_ptr()).next;
+                if self.cur.is_some() {
+                    // increment index
+                    self.index = Some(self.index.unwrap() + 1);
+                } else {
+                    // we've hit the ghost, null the index
+                    self.index = None;
+                }
+            }
+        } else if !self.list.empty() {
+            // on ghost element, move to start
+            self.cur = self.list.front;
+            self.index = Some(0);
+        }
+    }
+
+    /// Seek the cursor back a single step, jumping to end if we are at the ghost element
+    pub fn seek_backward(&mut self) {
+        if let Some(cur) = self.cur {
+            unsafe {
+                self.cur = (*cur.as_ptr()).prev;
+                if self.cur.is_some() {
+                    self.index = Some(self.index.unwrap() - 1);
+                } else {
+                    self.index = None;
+                }
+            }
+        } else if !self.list.empty() {
+            self.cur = self.list.back;
+            self.index = Some(self.list.len - 1);
+        }
+    }
+
+    pub fn seek_forward_until(&mut self, elem: &T) {
+        if self.cur.is_none() {
+            self.seek_forward();
+        }
+        while let Some(cur_el) = self.peek() {
+            if cur_el == elem {
+                return;
+            }
+            self.seek_forward();
+        }
+    }
+
+    pub fn seek_backward_until(&mut self, elem: &T) {
+        if self.cur.is_none() {
+            self.seek_backward();
+        }
+        while let Some(cur_el) = self.peek() {
+            if cur_el == elem {
+                return;
+            }
+            self.seek_backward();
+        }
+    }
+
+    pub fn peek(&self) -> Option<&T> {
+        unsafe { self.cur.map(|node| &(*node.as_ptr()).elem) }
     }
 }
 
@@ -140,31 +253,31 @@ where
         }
     }
 
-    pub fn seek_forward_until(&mut self, elem: T) {
+    pub fn seek_forward_until(&mut self, elem: &T) {
         if self.cur.is_none() {
             self.seek_forward();
         }
         while let Some(cur_el) = self.peek() {
-            if *cur_el == elem {
+            if cur_el == elem {
                 return;
             }
             self.seek_forward();
         }
     }
 
-    pub fn seek_backward_until(&mut self, elem: T) {
+    pub fn seek_backward_until(&mut self, elem: &T) {
         if self.cur.is_none() {
             self.seek_backward();
         }
         while let Some(cur_el) = self.peek() {
-            if *cur_el == elem {
+            if cur_el == elem {
                 return;
             }
             self.seek_backward();
         }
     }
 
-    pub fn peek(&mut self) -> Option<&T> {
+    pub fn peek(&self) -> Option<&T> {
         unsafe { self.cur.map(|node| &(*node.as_ptr()).elem) }
     }
 
@@ -422,12 +535,12 @@ mod test {
         c.push_after(1);
 
         // 1,2,3|4
-        c.seek_forward_until(3);
+        c.seek_forward_until(&3);
         assert_eq!(c.peek(), Some(&3));
         c.push_after(4);
 
         // 1|2,3,4
-        c.seek_backward_until(1);
+        c.seek_backward_until(&1);
         assert_eq!(c.peek(), Some(&1));
         c.seek_front();
         c.push_after(0);
