@@ -1,7 +1,6 @@
 use crate::element::*;
 use splay_tree::SplaySet;
 use std::cmp::max;
-use std::rc::Weak;
 
 pub struct ListCRDT<T> {
     our_id: AuthorID,
@@ -30,13 +29,10 @@ where
         }
     }
 
-    fn find_by_id(&mut self, id: OpID) -> Option<Weak<Element<T>>> {
+    fn find_by_id(&mut self, id: OpID) -> Option<Ref<Element<T>>> {
         // construct a fake element so we can query by id
         let fake_element = Element::ghost_element(id);
-        self.splayset.get(&fake_element).map(|elt| {
-            let node: *const Element<T> = elt;
-            unsafe { Weak::from_raw(node) }
-        })
+        self.splayset.get(&fake_element).map(|elt| elt as Ref<Element<T>> )
     }
 
     pub fn insert(&mut self, after: OpID, content: T) -> OpID {
@@ -61,7 +57,7 @@ where
         }
     }
 
-    pub fn iter<'a>(&'a self) -> Iter<'a, T> {
+    pub fn iter(&self) -> Iter<T> {
         Iter {
             inner_iter: self.splayset.iter(),
         }

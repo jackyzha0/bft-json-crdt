@@ -1,12 +1,13 @@
-use std::{rc::Weak, cmp::Ordering};
+use std::cmp::Ordering;
 
-pub type AuthorID = u64;
+pub type AuthorID = u8;
 pub type SequenceNumber = u64;
 pub type OpID = (AuthorID, SequenceNumber);
 
+pub type Ref<T> = *const T; 
 pub struct Element<T> {
     pub(crate) id: OpID,
-    pub(crate) origin: Option<Weak<Element<T>>>,
+    pub(crate) origin: Option<Ref<Element<T>>>,
     pub(crate) is_deleted: bool,
     pub(crate) content: Option<T>,
 }
@@ -33,10 +34,10 @@ impl<T> Element<T> {
         }
     }
 
-    pub fn origin_deref(&self) -> Option<&Element<T>> {
+    pub fn origin_deref(&self) -> Option<Ref<Element<T>>> {
         self.origin
             .as_ref()
-            .map(|origin| unsafe { &*origin.as_ptr() })
+            .map(|origin| *origin )
     }
 }
 
@@ -76,7 +77,7 @@ impl<T> Ord for Element<T> {
     }
 }
 
-impl<T> PartialOrd for Element<T> {
+impl< T> PartialOrd for Element<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
