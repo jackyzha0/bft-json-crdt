@@ -4,24 +4,36 @@ use crate::splay::{
 };
 use std::{cmp::max, collections::BTreeMap};
 
-pub struct ListCRDT<'a, T> {
+pub struct ListCRDT<'a, T>
+where
+    T: Clone,
+{
     our_id: AuthorID,
     arena_ref: &'a bumpalo::Bump,
     splaytree: SplayTree<'a, T>,
     id_to_ref: BTreeMap<OpID, &'a Node<'a, T>>,
     highest_sequence_number: SequenceNumber,
     size: usize,
+    /// key: IDs that we are missing, value: vec of Ops that are
+    /// waiting on it
+    message_q: BTreeMap<OpID, Vec<Op<T>>>,
 }
 
 #[derive(Clone, Copy)]
-pub struct Op<T> where T: Clone {
+pub struct Op<T>
+where
+    T: Clone,
+{
     pub(crate) origin: OpID,
     pub(crate) id: OpID,
     pub(crate) is_deleted: bool,
     pub(crate) content: Option<T>,
 }
 
-impl<T> Op<T> where T: Clone {
+impl<T> Op<T>
+where
+    T: Clone,
+{
     pub fn sequence_num(&self) -> SequenceNumber {
         self.id.1
     }
@@ -41,6 +53,7 @@ where
             arena_ref,
             id_to_ref,
             splaytree,
+            message_q: BTreeMap::new(),
             highest_sequence_number: 0,
             size: 0,
         }
@@ -64,18 +77,37 @@ where
 
     pub fn apply(&mut self, op: Op<T>) {
         let new_seq_num = op.sequence_num();
-        // TODO(1): check if we know about origin locally. if we don't we should
-        //       add this to a queue of messages to deliver upon receiving that origin
         let origin = self.id_to_ref.get(&op.origin).copied();
 
+        // we haven't received the causal parent of this operation yet, queue this it up for later
+        if origin.is_none() {
+            println!("haven't received message, queueing for later");
+            self.message_q.entry(op.origin).or_insert(Vec::new()).push(op); 
+            return;
+        }
+
         // TODO(2): check elt_is_deleted to handle delete case properly
-        let new_node = Node::new(self.arena_ref, op.id, origin, op.content, &mut self.splaytree);
+        let new_node = Node::new(
+            self.arena_ref,
+            op.id,
+            origin,
+            op.content,
+            &mut self.splaytree,
+        );
         self.id_to_ref.insert(op.id, new_node);
         self.highest_sequence_number = max(new_seq_num, self.highest_sequence_number);
         if !op.is_deleted {
             self.size += 1;
         } else {
             self.size -= 1;
+        }
+
+        // apply all of its causal dependents if there are any
+        let dependent_queue = self.message_q.remove(&op.id);
+        if let Some(mut q) = dependent_queue {
+            for dependent in q.drain(..) {
+                self.apply(dependent);
+            }
         }
     }
 
@@ -86,7 +118,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{splay::node::ROOT_ID, list_crdt::ListCRDT};
+    use crate::{list_crdt::ListCRDT, splay::node::ROOT_ID};
 
     #[test]
     fn test_simple() {
@@ -98,7 +130,7 @@ mod test {
         let _four = list.insert(_one.id, 4);
         assert_eq!(list.traverse_collect(), vec![&1, &4, &2, &3]);
     }
-    
+
     #[test]
     fn test_interweave_chars() {
         let arena = bumpalo::Bump::new();
@@ -108,7 +140,7 @@ mod test {
         let _three = list.insert(ROOT_ID, 'c');
         assert_eq!(list.traverse_collect(), vec![&'c', &'a', &'b']);
     }
-    
+
     #[test]
     fn test_conflicting_agents() {
         let arena = bumpalo::Bump::new();
