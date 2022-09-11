@@ -1,95 +1,88 @@
-use crate::element::*;
-use splay_tree::SplaySet;
+use crate::splay::{
+    node::{AuthorID, Node, OpID, SequenceNumber, ROOT_ID},
+    tree::SplayTree,
+};
 use std::cmp::max;
 
-pub struct ListCRDT<T> {
+pub struct ListCRDT<'a, T> {
     our_id: AuthorID,
-    splayset: SplaySet<Element<T>>,
+    arena_ref: &'a bumpalo::Bump,
+    splaytree: SplayTree<'a, T>,
     highest_sequence_number: SequenceNumber,
     size: usize,
 }
 
-impl<T> ListCRDT<T>
+pub struct Op<T> {
+    pub(crate) origin: OpID,
+    pub(crate) id: OpID,
+    pub(crate) is_deleted: bool,
+    pub(crate) content: Option<T>,
+}
+
+impl<T> Op<T> {
+    pub fn sequence_num(&self) -> SequenceNumber {
+        self.id.1
+    }
+}
+
+impl<'a, T> ListCRDT<'a, T>
 where
     T: Eq,
 {
-    pub fn new(id: AuthorID) -> ListCRDT<T> {
-        let mut splayset = SplaySet::new();
-        splayset.insert(Element {
-            id: ROOT_ID,
-            origin: None,
-            is_deleted: false,
-            content: None,
-        });
+    pub fn new(arena_ref: &'a bumpalo::Bump, id: AuthorID) -> ListCRDT<'a, T> {
+        let mut splaytree = SplayTree::default();
+        Node::new(&arena_ref, ROOT_ID, None, &mut splaytree);
         ListCRDT {
             our_id: id,
-            splayset,
+            arena_ref,
+            splaytree,
             highest_sequence_number: 0,
             size: 0,
         }
     }
 
-    fn find_by_id(&mut self, id: OpID) -> Option<Ref<Element<T>>> {
-        // construct a fake element so we can query by id
-        let fake_element = Element::ghost_element(id);
-        self.splayset.get(&fake_element).map(|elt| elt as Ref<Element<T>> )
-    }
-
     pub fn insert(&mut self, after: OpID, content: T) -> OpID {
         let id = (self.our_id, self.highest_sequence_number + 1);
-        let origin = self.find_by_id(after);
-        self.insert_remote(Element {
+        self.apply(Op {
             id,
-            origin,
+            origin: after,
             is_deleted: false,
             content: Some(content),
         });
         id
     }
 
-    pub fn insert_remote(&mut self, elt: Element<T>) {
-        let elt_seq_num = elt.sequence_num();
-        let elt_is_deleted = elt.is_deleted();
-        self.splayset.insert(elt);
+    pub fn apply(&mut self, op: Op<T>) {
+        let elt_seq_num = op.sequence_num();
+        let elt_is_deleted = op.is_deleted;
+        unsafe {
+            let origin = self.splaytree.find(&op.origin);
+            Node::new(self.arena_ref, op.id, op.content, &mut self.splaytree);
+        }
+
         self.highest_sequence_number = max(elt_seq_num, self.highest_sequence_number);
         if !elt_is_deleted {
             self.size += 1;
         }
     }
 
-    pub fn iter(&self) -> Iter<T> {
-        Iter {
-            inner_iter: self.splayset.iter(),
-        }
-    }
-}
-
-pub struct Iter<'a, T> {
-    inner_iter: splay_tree::set::Iter<'a, Element<T>>,
-}
-
-impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(elt) = self.inner_iter.next() {
-            if elt.id != ROOT_ID && !elt.is_deleted && elt.content.is_some() {
-                return elt.content.as_ref();
-            }
-        }
-        None
+    pub fn traverse_collect(&self) -> Vec<&T> {
+        self.splaytree.traverse_collect()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{ListCRDT, ROOT_ID};
+    use crate::{splay::node::ROOT_ID, list_crdt::ListCRDT};
+
 
     #[test]
-    fn test_basic_doc() {
-        let mut doc = ListCRDT::<u16>::new(0);
-        let _first_op = doc.insert(ROOT_ID, 0);
-        let _second_op = doc.insert(_first_op, 1);
-        let _third_op = doc.insert(ROOT_ID, 2);
-        assert_eq!(doc.iter().collect::<Vec<_>>(), vec![&2, &0, &1]);
+    fn test_simple() {
+        let arena = bumpalo::Bump::new();
+        let mut list = ListCRDT::new(&arena, 1);
+        let _one = list.insert(ROOT_ID, 1);
+        let _two = list.insert(_one, 3);
+        let _three = list.insert(_two, 2);
+        assert_eq!(list.traverse_collect(), vec![&1, &3, &2]);
     }
 }
