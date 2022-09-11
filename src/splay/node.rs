@@ -14,7 +14,7 @@ pub struct Node<'a, T> {
     pub(crate) left: Cell<Option<&'a Node<'a, T>>>,
     pub(crate) right: Cell<Option<&'a Node<'a, T>>>,
     pub(crate) origin: Cell<Option<&'a Node<'a, T>>>,
-    
+
     // CRDT fields
     pub(crate) id: OpID,
     pub(crate) is_deleted: bool,
@@ -36,14 +36,20 @@ impl<'a, T> Default for Node<'a, T> {
 }
 
 impl<'a, T> Node<'a, T> {
-    pub fn new(arena: &'a bumpalo::Bump, id: OpID, content: Option<T>, tree: &mut SplayTree<'a, T>) -> &'a Node<'a, T> {
+    pub fn new(
+        arena: &'a bumpalo::Bump,
+        id: OpID,
+        origin: Option<&'a Node<'a, T>>, 
+        content: Option<T>,
+        tree: &mut SplayTree<'a, T>,
+    ) -> &'a Node<'a, T> {
         let node = arena.alloc(Node {
             id,
             is_deleted: false,
             content,
             left: Cell::new(None),
             right: Cell::new(None),
-            origin: Cell::new(None),
+            origin: Cell::new(origin),
         });
         unsafe {
             tree.insert(node);
@@ -62,7 +68,7 @@ impl<'a, T> Node<'a, T> {
     pub fn origin(&self) -> Option<&'a Node<T>> {
         self.origin.get()
     }
-    
+
     pub fn author(&self) -> AuthorID {
         self.id.0
     }
@@ -141,8 +147,3 @@ impl<'a, T> NodeComparable<'a, T> for Node<'a, T> {
     }
 }
 
-impl<'a, T> NodeComparable<'a, T> for OpID {
-    fn compare_to_node(&self, other: &'a Node<T>) -> Ordering {
-        self.cmp(&other.id)
-    }
-}
