@@ -116,6 +116,11 @@ impl<T> PartialOrd for Node<'_, T> {
 }
 
 impl<'a, T> Ord for Node<'a, T> {
+    // effectively how RGA works:
+    // 1. Build the tree, connecting each item to its parent
+    // 2. When an item has multiple children, sort them
+    //   a) by sequence number then 
+    //   b) by their author_id
     fn cmp(&self, other: &Self) -> Ordering {
         if self.id == other.id {
             return Ordering::Equal;
