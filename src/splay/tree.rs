@@ -144,10 +144,11 @@ impl<'a, T> SplayTree<'a, T> {
                             // rotate right
                             current.left.set(current_left.right.get());
                             current_left.right.set(Some(current));
+                            current = current_left;
                             match current.left.get() {
                                 Some(l) => current_left = l,
                                 None => break,
-                            }   current = current_left;
+                            }
                         }
                         // link right
                         // break link between current and current.right

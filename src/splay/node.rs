@@ -125,8 +125,12 @@ impl<'a, T> Ord for Node<'a, T> {
         let our_origin = self.origin.get();
         let other_origin = other.origin.get();
         match our_origin.cmp(&other_origin) {
-            Ordering::Greater => Ordering::Greater,
-            Ordering::Less => Ordering::Less,
+            Ordering::Greater => {
+                Ordering::Greater
+            },
+            Ordering::Less => {
+                Ordering::Less
+            },
             Ordering::Equal => {
                 // parents are equal, is sequence number the same?
                 if self.sequence_num() == other.sequence_num() {
@@ -143,7 +147,7 @@ impl<'a, T> Ord for Node<'a, T> {
 
 impl<'a, T> NodeComparable<'a, T> for Node<'a, T> {
     fn compare_to_node(&self, other: &'a Node<'a, T>) -> Ordering {
-        self.cmp(&other)
+        self.cmp(other)
     }
 }
 

@@ -33,7 +33,7 @@ where
     pub fn new(arena_ref: &'a bumpalo::Bump, id: AuthorID) -> ListCRDT<'a, T> {
         let mut splaytree = SplayTree::default();
         let mut id_to_ref = BTreeMap::new();
-        let root_node = Node::new(&arena_ref, ROOT_ID, None, None, &mut splaytree);
+        let root_node = Node::new(arena_ref, ROOT_ID, None, None, &mut splaytree);
         id_to_ref.insert(ROOT_ID, root_node);
         ListCRDT {
             our_id: id,
@@ -59,12 +59,14 @@ where
     pub fn apply(&mut self, op: Op<T>) {
         let elt_seq_num = op.sequence_num();
         let elt_is_deleted = op.is_deleted;
-        let origin = self.id_to_ref.get(&op.origin).map(|origin| *origin);
+        let origin = self.id_to_ref.get(&op.origin).copied();
         let new_node = Node::new(self.arena_ref, op.id, origin, op.content, &mut self.splaytree);
-        self.id_to_ref.insert(op.origin, new_node);
+        self.id_to_ref.insert(op.id, new_node);
         self.highest_sequence_number = max(elt_seq_num, self.highest_sequence_number);
         if !elt_is_deleted {
             self.size += 1;
+        } else {
+            self.size -= 1;
         }
     }
 
@@ -77,7 +79,6 @@ where
 mod test {
     use crate::{splay::node::ROOT_ID, list_crdt::ListCRDT};
 
-
     #[test]
     fn test_simple() {
         let arena = bumpalo::Bump::new();
@@ -85,7 +86,7 @@ mod test {
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one, 2);
         let _three = list.insert(_two, 3);
-        let _two = list.insert(_one, 4);
+        let _four = list.insert(_one, 4);
         assert_eq!(list.traverse_collect(), vec![&1, &4, &2, &3]);
     }
     
