@@ -9,14 +9,17 @@ where
     T: Clone,
 {
     our_id: AuthorID,
-    arena_ref: &'a bumpalo::Bump,
     splaytree: SplayTree<'a, T>,
     id_to_ref: BTreeMap<OpID, &'a Node<'a, T>>,
-    highest_sequence_number: SequenceNumber,
     size: usize,
+
+    // TODO: abstract these into a CRDTManager struct or something so we
+    // don't duplicate this storage for nested CRDTs later
     /// key: IDs that we are missing, value: vec of Ops that are
     /// waiting on it
     message_q: BTreeMap<OpID, Vec<Op<T>>>,
+    vector_clock: BTreeMap<AuthorID, SequenceNumber>,
+    arena_ref: &'a bumpalo::Bump,
 }
 
 #[derive(Clone, Copy)]
@@ -34,6 +37,10 @@ impl<T> Op<T>
 where
     T: Clone,
 {
+    pub fn author(&self) -> AuthorID {
+        self.id.0
+    }
+
     pub fn sequence_num(&self) -> SequenceNumber {
         self.id.1
     }
@@ -48,19 +55,31 @@ where
         let mut id_to_ref = BTreeMap::new();
         let root_node = Node::new(arena_ref, ROOT_ID, None, None, &mut splaytree);
         id_to_ref.insert(ROOT_ID, root_node);
+        let mut vector_clock = BTreeMap::new();
+        vector_clock.insert(id, 0);
         ListCRDT {
             our_id: id,
             arena_ref,
             id_to_ref,
             splaytree,
             message_q: BTreeMap::new(),
-            highest_sequence_number: 0,
+            vector_clock,
             size: 0,
         }
     }
 
+    pub fn sequence_num(&self) -> SequenceNumber {
+        *self.vector_clock.get(&self.our_id).unwrap()
+    }
+
+    pub fn update_sequence_num(&mut self, id: AuthorID, new_seq: SequenceNumber) {
+        let old_val = self.vector_clock.get(&id).unwrap_or(&new_seq);
+        let new_seq_num = max(old_val, &new_seq);
+        self.vector_clock.insert(id, *new_seq_num);
+    }
+
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
-        let id = (self.our_id, self.highest_sequence_number + 1);
+        let id = (self.our_id, self.sequence_num() + 1);
         let op = Op {
             id,
             origin: after,
@@ -72,21 +91,31 @@ where
     }
 
     pub fn delete(&mut self, id: OpID) {
+        // TODO(1): actually implement delete
         todo!();
     }
 
     pub fn apply(&mut self, op: Op<T>) {
+        // check if this is the next message we are expecting
         let new_seq_num = op.sequence_num();
-        let origin = self.id_to_ref.get(&op.origin).copied();
+        if new_seq_num != self.vector_clock.get(&op.author()).unwrap_or(&0) + 1 {
+            // TODO(2): queue messages that are out of order similar to how we have a message q for
+            // causal parents
+            // maybe a way to combine the two message queues to not waste space
+            panic!("received message out of order!")
+        }
 
+        let origin = self.id_to_ref.get(&op.origin).copied();
         // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin.is_none() {
-            println!("haven't received message, queueing for later");
-            self.message_q.entry(op.origin).or_insert(Vec::new()).push(op); 
+            self.message_q
+                .entry(op.origin)
+                .or_insert(Vec::new())
+                .push(op);
             return;
         }
 
-        // TODO(2): check elt_is_deleted to handle delete case properly
+        // TODO(1): check elt_is_deleted to handle delete case properly
         let new_node = Node::new(
             self.arena_ref,
             op.id,
@@ -95,7 +124,7 @@ where
             &mut self.splaytree,
         );
         self.id_to_ref.insert(op.id, new_node);
-        self.highest_sequence_number = max(new_seq_num, self.highest_sequence_number);
+        self.update_sequence_num(self.our_id, new_seq_num);
         if !op.is_deleted {
             self.size += 1;
         } else {
@@ -160,7 +189,6 @@ mod test {
         list1.apply(_2_d);
         list2.apply(_1_x);
         assert_eq!(list1.traverse_collect(), vec![&'d', &'a', &'b', &'y', &'x']);
-        // this is failing because of TODO(1)
         assert_eq!(list1.traverse_collect(), list2.traverse_collect());
     }
 }
