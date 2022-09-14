@@ -15,10 +15,11 @@ where
 
     // TODO: abstract these into a CRDTManager struct or something so we
     // don't duplicate this storage for nested CRDTs later
-    /// key: IDs that we are missing, value: vec of Ops that are
-    /// waiting on it
+    //
+    /// K: ID that has not arrived
+    /// V: Vec of Ops that are waiting on message K
     message_q: BTreeMap<OpID, Vec<Op<T>>>,
-    vector_clock: BTreeMap<AuthorID, SequenceNumber>,
+    logical_clocks: BTreeMap<AuthorID, SequenceNumber>,
     arena_ref: &'a bumpalo::Bump,
 }
 
@@ -55,27 +56,31 @@ where
         let mut id_to_ref = BTreeMap::new();
         let root_node = Node::new(arena_ref, ROOT_ID, None, None, &mut splaytree);
         id_to_ref.insert(ROOT_ID, root_node);
-        let mut vector_clock = BTreeMap::new();
-        vector_clock.insert(id, 0);
+        let mut logical_clocks = BTreeMap::new();
+        logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
             arena_ref,
             id_to_ref,
             splaytree,
             message_q: BTreeMap::new(),
-            vector_clock,
+            logical_clocks,
             size: 0,
         }
     }
 
     pub fn sequence_num(&self) -> SequenceNumber {
-        *self.vector_clock.get(&self.our_id).unwrap()
+        *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
-    pub fn update_sequence_num(&mut self, id: AuthorID, new_seq: SequenceNumber) {
-        let old_val = self.vector_clock.get(&id).unwrap_or(&new_seq);
-        let new_seq_num = max(old_val, &new_seq);
-        self.vector_clock.insert(id, *new_seq_num);
+    fn get_sequence_number(&mut self, id: AuthorID) -> SequenceNumber {
+        let val = self.logical_clocks.entry(id).or_insert(0);
+        *val
+    }
+
+    fn update_sequence_num(&mut self, id: AuthorID, new_seq: SequenceNumber) {
+        let new_seq_num = max(self.get_sequence_number(id), new_seq);
+        self.logical_clocks.insert(id, new_seq_num);
     }
 
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
@@ -98,14 +103,8 @@ where
     pub fn apply(&mut self, op: Op<T>) {
         // check if this is the next message we are expecting
         let new_seq_num = op.sequence_num();
-        if new_seq_num != self.vector_clock.get(&op.author()).unwrap_or(&0) + 1 {
-            // TODO(2): queue messages that are out of order similar to how we have a message q for
-            // causal parents
-            // maybe a way to combine the two message queues to not waste space
-            panic!("received message out of order!")
-        }
-
         let origin = self.id_to_ref.get(&op.origin).copied();
+
         // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin.is_none() {
             self.message_q
@@ -127,8 +126,6 @@ where
         self.update_sequence_num(self.our_id, new_seq_num);
         if !op.is_deleted {
             self.size += 1;
-        } else {
-            self.size -= 1;
         }
 
         // apply all of its causal dependents if there are any
@@ -185,9 +182,9 @@ mod test {
         let _1_x = list1.insert(_2_b.id, 'x');
 
         // create artificial delay, then apply out of order
+        list2.apply(_1_x);
         list1.apply(_2_y);
         list1.apply(_2_d);
-        list2.apply(_1_x);
         assert_eq!(list1.traverse_collect(), vec![&'d', &'a', &'b', &'y', &'x']);
         assert_eq!(list1.traverse_collect(), list2.traverse_collect());
     }

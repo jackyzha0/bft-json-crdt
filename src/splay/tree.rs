@@ -41,10 +41,7 @@ impl<'a, T> SplayTree<'a, T> {
     }
 
     #[inline(never)]
-    pub unsafe fn insert(
-        &mut self,
-        new_node: &'a Node<'a, T>,
-    ) -> bool {
+    pub unsafe fn insert(&mut self, new_node: &'a Node<'a, T>) -> bool {
         match self.root {
             Some(root) => {
                 // splay this key to the top

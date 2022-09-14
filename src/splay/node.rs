@@ -39,7 +39,7 @@ impl<'a, T> Node<'a, T> {
     pub fn new(
         arena: &'a bumpalo::Bump,
         id: OpID,
-        origin: Option<&'a Node<'a, T>>, 
+        origin: Option<&'a Node<'a, T>>,
         content: Option<T>,
         tree: &mut SplayTree<'a, T>,
     ) -> &'a Node<'a, T> {
@@ -119,8 +119,9 @@ impl<'a, T> Ord for Node<'a, T> {
     // effectively how RGA works:
     // 1. Build the tree, connecting each item to its parent
     // 2. When an item has multiple children, sort them
-    //   a) by sequence number then 
-    //   b) by their author_id
+    //   a) by origin (we want to insert after the right causal parent)
+    //   b) by inverted sequence_num (things inserted later come earlier)
+    //   c) by author (all else equal, tie break on author for determinism)
     fn cmp(&self, other: &Self) -> Ordering {
         if self.id == other.id {
             return Ordering::Equal;
@@ -130,22 +131,16 @@ impl<'a, T> Ord for Node<'a, T> {
         let our_origin = self.origin.get();
         let other_origin = other.origin.get();
         match our_origin.cmp(&other_origin) {
-            Ordering::Greater => {
-                Ordering::Greater
-            },
-            Ordering::Less => {
-                Ordering::Less
-            },
+            Ordering::Greater => Ordering::Greater,
             Ordering::Equal => {
-                // parents are equal, is sequence number the same?
-                if self.sequence_num() == other.sequence_num() {
-                    // tie break on author id
-                    self.author().cmp(&other.author())
-                } else {
-                    // if sequence number is not > or == then it must be <
-                    Ordering::Less
+                // parents are equal, try to break on inverted sequence number
+                match other.sequence_num().cmp(&self.sequence_num()) {
+                    Ordering::Greater => Ordering::Greater,
+                    Ordering::Equal => self.author().cmp(&other.author()),
+                    Ordering::Less => Ordering::Less,
                 }
             }
+            Ordering::Less => Ordering::Less,
         }
     }
 }
@@ -155,4 +150,3 @@ impl<'a, T> NodeComparable<'a, T> for Node<'a, T> {
         self.cmp(other)
     }
 }
-
