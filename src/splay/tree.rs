@@ -1,20 +1,30 @@
 use crate::splay::node::Node;
 use core::cmp::Ordering;
+use std::fmt::Display;
 
 use super::node::NodeComparable;
 
-pub struct SplayTree<'a, T> {
+pub struct SplayTree<'a, T>
+where
+    T: Display,
+{
     root: Option<&'a Node<'a, T>>,
 }
 
-impl<'a, T> Default for SplayTree<'a, T> {
+impl<'a, T> Default for SplayTree<'a, T>
+where
+    T: Display,
+{
     #[inline]
     fn default() -> SplayTree<'a, T> {
         SplayTree { root: None }
     }
 }
 
-impl<'a, T> SplayTree<'a, T> {
+impl<'a, T> SplayTree<'a, T>
+where
+    T: Display,
+{
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.root.is_none()
@@ -26,7 +36,7 @@ impl<'a, T> SplayTree<'a, T> {
     }
 
     #[inline(never)]
-    pub unsafe fn find(&mut self, key: &dyn NodeComparable<'a, T>) -> Option<&'a Node<'a, T>> {
+    pub fn find(&mut self, key: &dyn NodeComparable<'a, T>) -> Option<&'a Node<'a, T>> {
         self.root.and_then(|root| {
             // splay the key to the top
             let root = self.splay(root, key);
@@ -41,7 +51,7 @@ impl<'a, T> SplayTree<'a, T> {
     }
 
     #[inline(never)]
-    pub unsafe fn insert(&mut self, new_node: &'a Node<'a, T>) -> bool {
+    pub fn insert(&mut self, new_node: &'a Node<'a, T>) -> bool {
         match self.root {
             Some(root) => {
                 // splay this key to the top
@@ -74,7 +84,7 @@ impl<'a, T> SplayTree<'a, T> {
     }
 
     #[inline(never)]
-    pub unsafe fn remove(&mut self, key: &dyn NodeComparable<'a, T>) -> Option<&'a Node<'a, T>> {
+    pub fn remove(&mut self, key: &dyn NodeComparable<'a, T>) -> Option<&'a Node<'a, T>> {
         self.root.and_then(|root| {
             let node_to_remove = self.splay(root, key);
             self.root = None;
@@ -103,16 +113,18 @@ impl<'a, T> SplayTree<'a, T> {
     }
 
     pub fn traverse_collect(&self) -> Vec<&T> {
-        let mut res = Vec::<&'a T>::new();
+        let mut res = Vec::<&'a Node<'a, T>>::new();
         if let Some(root) = self.root {
             root.traverse_collect(&mut res);
         }
-        res
+        res.iter()
+            .map(|node| node.content.as_ref().unwrap())
+            .collect()
     }
 
     // O(log n) top-down splay
     // brings key to top if present
-    unsafe fn splay(
+    fn splay(
         &mut self,
         mut current: &'a Node<'a, T>,
         key: &dyn NodeComparable<'a, T>,

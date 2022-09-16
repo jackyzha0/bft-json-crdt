@@ -1,12 +1,13 @@
 use crate::splay::{
+    debug::{display_author, display_op},
     node::{AuthorID, Node, OpID, SequenceNumber, ROOT_ID},
     tree::SplayTree,
 };
-use std::{cmp::max, collections::BTreeMap};
+use std::{cmp::max, collections::BTreeMap, fmt::Display};
 
 pub struct ListCRDT<'a, T>
 where
-    T: Clone,
+    T: Clone + Display,
 {
     our_id: AuthorID,
     splaytree: SplayTree<'a, T>,
@@ -49,7 +50,7 @@ where
 
 impl<'a, T> ListCRDT<'a, T>
 where
-    T: Eq + Clone,
+    T: Eq + Clone + Display,
 {
     pub fn new(arena_ref: &'a bumpalo::Bump, id: AuthorID) -> ListCRDT<'a, T> {
         let mut splaytree = SplayTree::default();
@@ -101,7 +102,6 @@ where
     }
 
     pub fn apply(&mut self, op: Op<T>) {
-        // check if this is the next message we are expecting
         let new_seq_num = op.sequence_num();
         let origin = self.id_to_ref.get(&op.origin).copied();
 
@@ -115,6 +115,13 @@ where
         }
 
         // TODO(1): check elt_is_deleted to handle delete case properly
+        println!(
+            "{} Performing an insert of {}: '{}' after {}",
+            display_author(self.our_id),
+            display_op(op.id),
+            op.content.as_ref().unwrap(),
+            display_op(op.origin)
+        );
         let new_node = Node::new(
             self.arena_ref,
             op.id,
@@ -124,6 +131,7 @@ where
         );
         self.id_to_ref.insert(op.id, new_node);
         self.update_sequence_num(self.our_id, new_seq_num);
+        println!("{}", self.splaytree.print(Some(op.id)));
         if !op.is_deleted {
             self.size += 1;
         }
@@ -140,11 +148,19 @@ where
     pub fn traverse_collect(&self) -> Vec<&T> {
         self.splaytree.traverse_collect()
     }
+
+    pub fn print(&self) -> String {
+        self.splaytree.print(None)
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{list_crdt::ListCRDT, splay::node::ROOT_ID};
+    use crate::{
+        list_crdt::{ListCRDT, Op, OpID},
+        splay::node::{AuthorID, ROOT_ID},
+    };
+    use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
     #[test]
     fn test_simple() {
@@ -185,7 +201,56 @@ mod test {
         list2.apply(_1_x);
         list1.apply(_2_y);
         list1.apply(_2_d);
+
         assert_eq!(list1.traverse_collect(), vec![&'d', &'a', &'b', &'y', &'x']);
         assert_eq!(list1.traverse_collect(), list2.traverse_collect());
+    }
+
+    fn random_op<T: Clone>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
+        arr.choose(rng).map(|op| op.id).unwrap_or(ROOT_ID)
+    }
+
+    #[test]
+    fn test_fuzz_commutative_property() {
+        let n: usize = 1;
+        let mut rng = rand::thread_rng();
+        for _ in 0..n {
+            let arena = bumpalo::Bump::new();
+            let mut op_log = Vec::<Op<char>>::new();
+            let auth1: AuthorID = rng.gen();
+            let auth2: AuthorID = rng.gen();
+            let mut l1 = ListCRDT::<char>::new(&arena, auth1);
+            let mut l2 = ListCRDT::<char>::new(&arena, auth2);
+            let mut chk = ListCRDT::<char>::new(&arena, rng.gen());
+            for _ in 0..rng.gen_range(4..5) {
+                let letter1: char = rng.gen_range(b'a'..b'z') as char;
+                let letter2: char = rng.gen_range(b'a'..b'z') as char;
+                let op1 = l1.insert(random_op(&op_log, &mut rng), letter1);
+                let op2 = l2.insert(random_op(&op_log, &mut rng), letter2);
+                op_log.push(op1);
+                op_log.push(op2);
+            }
+
+            // shuffle ops
+            op_log.shuffle(&mut rng);
+
+            // apply to each other
+            for op in op_log {
+                if op.author() == auth1 {
+                    l2.apply(op)
+                } else if op.author() == auth2 {
+                    l1.apply(op)
+                }
+                chk.apply(op)
+            }
+
+            // ensure all equal
+            let l1_doc = l1.traverse_collect();
+            let l2_doc = l2.traverse_collect();
+            let chk_doc = chk.traverse_collect();
+            assert_eq!(l1_doc, l2_doc);
+            assert_eq!(l1_doc, chk_doc);
+            assert_eq!(l2_doc, chk_doc);
+        }
     }
 }

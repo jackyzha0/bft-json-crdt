@@ -1,5 +1,7 @@
 use core::cell::Cell;
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt::Display};
+
+use crate::splay::debug::display_op;
 
 use super::tree::SplayTree;
 
@@ -35,7 +37,10 @@ impl<'a, T> Default for Node<'a, T> {
     }
 }
 
-impl<'a, T> Node<'a, T> {
+impl<'a, T> Node<'a, T>
+where
+    T: Display,
+{
     pub fn new(
         arena: &'a bumpalo::Bump,
         id: OpID,
@@ -51,10 +56,8 @@ impl<'a, T> Node<'a, T> {
             right: Cell::new(None),
             origin: Cell::new(origin),
         });
-        unsafe {
-            tree.insert(node);
-            node
-        }
+        tree.insert(node);
+        node
     }
 
     pub fn left(&self) -> Option<&'a Node<T>> {
@@ -82,13 +85,13 @@ impl<'a, T> Node<'a, T> {
     }
 
     // In-order traversal
-    pub(crate) fn traverse_collect(&'a self, vec: &mut Vec<&'a T>) {
+    pub(crate) fn traverse_collect(&'a self, vec: &mut Vec<&'a Node<'a, T>>) {
         if let Some(left) = self.left.get() {
             left.traverse_collect(vec);
         }
 
         if !self.is_deleted && self.content.is_some() {
-            vec.push(self.content.as_ref().unwrap())
+            vec.push(self)
         }
 
         if let Some(right) = self.right.get() {
@@ -107,15 +110,21 @@ impl<T> PartialEq for Node<'_, T> {
     }
 }
 
-impl<T> Eq for Node<'_, T> {}
+impl<T> Eq for Node<'_, T> where T: Display {}
 
-impl<T> PartialOrd for Node<'_, T> {
+impl<T> PartialOrd for Node<'_, T>
+where
+    T: Display,
+{
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a, T> Ord for Node<'a, T> {
+impl<'a, T> Ord for Node<'a, T>
+where
+    T: Display,
+{
     // effectively how RGA works:
     // 1. Build the tree, connecting each item to its parent
     // 2. When an item has multiple children, sort them
@@ -145,8 +154,13 @@ impl<'a, T> Ord for Node<'a, T> {
     }
 }
 
-impl<'a, T> NodeComparable<'a, T> for Node<'a, T> {
+impl<'a, T> NodeComparable<'a, T> for Node<'a, T>
+where
+    T: Display,
+{
     fn compare_to_node(&self, other: &'a Node<'a, T>) -> Ordering {
-        self.cmp(other)
+        let res = self.cmp(other);
+        println!("Comparison check: {} {:?} {}", display_op(self.id), res, display_op(other.id));
+        res
     }
 }

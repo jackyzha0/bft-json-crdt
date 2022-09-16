@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bumpalo = "3.11.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+colored = "2.0.0"
+rand = "0.8.5"
+random_color = "0.6.1"
 
