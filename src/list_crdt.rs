@@ -77,13 +77,13 @@ where
         op
     }
 
-    /// Mark a
-    pub fn delete(&mut self, id: OpID) {
-        // let maybe_idx = self.find(id);
-        // if let Some(idx) = maybe_idx {
-        //     self.ops[idx].is_deleted = true;
-        // }
-        // TODO(0): generate an Op from this that we can broadcast
+    /// Mark a node as deleted. Will panic if the node doesn't exist
+    pub fn delete(&mut self, id: OpID) -> Op<T> {
+        let idx = self.find(id).unwrap();
+        let mut op = self.ops[idx].clone();
+        op.is_deleted = true;
+        self.apply(op.clone());
+        op
     }
 
     /// Find the idx of an operation with the given [`OpID`]
@@ -108,8 +108,7 @@ where
             return;
         }
 
-        // TODO(1): check elt_is_deleted to handle delete case properly
-        // actual insert
+        // integrate operation locally and update bookkeeping
         self.log_apply(&op);
         self.integrate(op);
         self.logical_clocks.insert(agent, agent_seq);
@@ -144,6 +143,12 @@ where
         while i < self.ops.len() {
             let op = &self.ops[i];
             let op_parent_idx = self.find(op.origin).unwrap();
+
+            // if we are the same node, just replace (guarantees idempotency)
+            if op.id == new_op.id {
+                self.ops[i] = new_op;
+                return;
+            }
 
             // first, lets compare causal origins
             match new_op_parent_idx.cmp(&op_parent_idx) {
@@ -200,6 +205,27 @@ mod test {
         let _four = list.insert(_one.id, 4);
         assert_eq!(list.view(), vec![&1, &4, &2, &3]);
     }
+    
+    #[test]
+    fn test_idempotence() {
+        let mut list = ListCRDT::new(1);
+        let op = list.insert(ROOT_ID, 1);
+        for _ in 1..10 {
+            list.apply(op);
+        }
+        assert_eq!(list.view(), vec![&1]);
+    }
+
+    #[test]
+    fn test_delete() {
+        let mut list = ListCRDT::new(1);
+        let _one = list.insert(ROOT_ID, 'a');
+        let _two = list.insert(_one.id, 'b');
+        let _three = list.insert(ROOT_ID, 'c');
+        list.delete(_one.id);
+        list.delete(_two.id);
+        assert_eq!(list.view(), vec![&'c']);
+    }
 
     #[test]
     fn test_interweave_chars() {
@@ -229,6 +255,21 @@ mod test {
         list1.apply(_2_d);
 
         assert_eq!(list1.view(), vec![&'d', &'a', &'b', &'y', &'x']);
+        assert_eq!(list1.view(), list2.view());
+    }
+    
+    #[test]
+    fn test_delete_multiple_agent() {
+        let mut list1 = ListCRDT::new(1);
+        let mut list2 = ListCRDT::new(2);
+        let _1_a = list1.insert(ROOT_ID, 'a');
+        list2.apply(_1_a);
+        let _2_b = list2.insert(_1_a.id, 'b');
+        let del_1_a = list1.delete(_1_a.id);
+        list1.apply(_2_b);
+        list2.apply(del_1_a);
+
+        assert_eq!(list1.view(), vec![&'b']);
         assert_eq!(list1.view(), list2.view());
     }
 

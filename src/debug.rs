@@ -8,6 +8,11 @@ use colored::Colorize;
 use random_color::{Luminosity, RandomColor};
 
 const ENABLE_LOGGING: bool = false;
+
+fn author_to_hex(author: AuthorID) -> String {
+    format!("{:#x}", author).to_string()
+}
+
 pub fn display_op_id(op: OpID) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
@@ -15,7 +20,7 @@ pub fn display_op_id(op: OpID) -> String {
         .to_rgb_array();
     format!(
         "[{},{}]",
-        op.0.to_string().bold().truecolor(r, g, b),
+        author_to_hex(op.0).bold().truecolor(r, g, b),
         op.1.to_string().yellow()
     )
 }
@@ -25,7 +30,7 @@ pub fn display_author(author: AuthorID) -> String {
         .luminosity(Luminosity::Light)
         .seed(author as u32 + 4)
         .to_rgb_array();
-    format!(" {} ", author)
+    format!(" {} ", author_to_hex(author))
         .black()
         .on_truecolor(r, g, b)
         .to_string()
@@ -44,11 +49,6 @@ where
 
         // do in-order traversal
         let res: Vec<&Op<T>> = self.ops.iter().collect();
-        lines.push(format!(
-            " {} {}",
-            display_op_id(ROOT_ID),
-            "Root".red().bold()
-        ));
         if res.len() == 0 {
             println!("{}", "[empty]".to_string());
         }
@@ -61,6 +61,9 @@ where
         }
 
         let is_last = |op: &Op<T>| -> bool {
+            if op.id == ROOT_ID {
+                return true;
+            }
             if let Some(children) = parent_child_map.get(&op.origin) {
                 return *children.last().unwrap() == op.id;
             }
@@ -91,12 +94,33 @@ where
             let cur_char = if is_last(op) { "╰─" } else { "├─" };
             let prefixes = stack.iter().map(|s| s.1).collect::<Vec<_>>().join("");
             let highlight_text = if highlight.is_some() && highlight.unwrap() == op.id {
-                "NEW!".bold().green().to_string()
+                if op.is_deleted {
+                    "<- deleted".bold().red()
+                } else {
+                    "<- inserted".bold().green()
+                }
+                .to_string()
             } else {
                 "".to_string()
             };
 
-            if let Some(content) = &op.content {
+            let content = if op.id == ROOT_ID {
+                "root".blue().bold().to_string()
+            } else {
+                op.content
+                    .as_ref()
+                    .map_or("[empty]".to_string(), |c| c.to_string())
+            };
+            if op.is_deleted {
+                lines.push(format!(
+                    "{}{}{} {} {}",
+                    prefixes,
+                    cur_char,
+                    display_op_id(op.id),
+                    content.strikethrough().red(),
+                    highlight_text
+                ));
+            } else {
                 lines.push(format!(
                     "{}{}{} {} {}",
                     prefixes,
@@ -104,14 +128,6 @@ where
                     display_op_id(op.id),
                     content,
                     highlight_text
-                ));
-            } else if op.is_deleted {
-                lines.push(format!(
-                    "{}{}{} {}",
-                    prefixes,
-                    cur_char,
-                    display_op_id(op.id),
-                    "deleted".red().bold()
                 ));
             }
             prev = Some(op.id);
@@ -131,6 +147,16 @@ where
 
     pub fn log_apply(&self, op: &Op<T>) {
         if !ENABLE_LOGGING {
+            return;
+        }
+
+        if op.is_deleted {
+            println!(
+                "{} Performing a delete of {}@{}",
+                display_author(self.our_id),
+                display_op_id(op.id),
+                op.sequence_num(),
+            );
             return;
         }
 

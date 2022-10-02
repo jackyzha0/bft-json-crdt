@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bumpalo = "3.11.0"
 colored = "2.0.0"
 rand = "0.8.5"
 random_color = "0.6.1"
-

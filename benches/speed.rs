@@ -2,7 +2,7 @@
 
 extern crate test;
 use bft_json_crdt::{list_crdt::ListCRDT, op::Op, op::ROOT_ID};
-use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
+use rand::{seq::SliceRandom, Rng};
 use test::Bencher;
 
 #[bench]
@@ -32,12 +32,12 @@ fn bench_insert_many_agents_conflicts(b: &mut Bencher) {
     b.iter(|| {
         const N: usize = 100;
         let mut rng = rand::thread_rng();
-        let mut crdts: Vec<ListCRDT<char>> = Vec::with_capacity(N);
-        let mut logs: Vec<Op<char>> = Vec::new();
+        let mut crdts: Vec<ListCRDT<usize>> = Vec::with_capacity(N);
+        let mut logs: Vec<Op<usize>> = Vec::new();
         for i in 0..N {
             crdts.push(ListCRDT::new(rng.gen()));
             for _ in 0..5 {
-                let op = crdts[i].insert(ROOT_ID, 'a');
+                let op = crdts[i].insert(ROOT_ID, i);
                 logs.push(op);
             }
         }
