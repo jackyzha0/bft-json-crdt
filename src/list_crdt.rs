@@ -1,93 +1,74 @@
-use crate::splay::{
-    debug::{display_author, display_op},
-    node::{AuthorID, Node, OpID, SequenceNumber, ROOT_ID},
-    tree::SplayTree,
+use crate::op::*;
+use std::{
+    cmp::{max, Ordering},
+    collections::BTreeMap,
+    fmt::Display,
 };
-use std::{cmp::max, collections::BTreeMap, fmt::Display};
 
-pub struct ListCRDT<'a, T>
+pub struct ListCRDT<T>
 where
     T: Clone + Display,
 {
-    our_id: AuthorID,
-    splaytree: SplayTree<'a, T>,
-    id_to_ref: BTreeMap<OpID, &'a Node<'a, T>>,
-    size: usize,
+    /// Our unique ID
+    pub our_id: AuthorID,
 
-    // TODO: abstract these into a CRDTManager struct or something so we
-    // don't duplicate this storage for nested CRDTs later
-    //
-    /// K: ID that has not arrived
-    /// V: Vec of Ops that are waiting on message K
+    /// List of all the operations we know of
+    pub(crate) ops: Vec<Op<T>>,
+
+    /// Queue of messages where K is the ID of the message yet to arrive
+    /// and V is the list of operations depending on it
     message_q: BTreeMap<OpID, Vec<Op<T>>>,
+
+    /// Keeps track of the latest document version we know for each peer
     logical_clocks: BTreeMap<AuthorID, SequenceNumber>,
-    arena_ref: &'a bumpalo::Bump,
+
+    /// Highest document version we've seen
+    highest_seq: SequenceNumber,
 }
 
-#[derive(Clone, Copy)]
-pub struct Op<T>
+impl<T> ListCRDT<T>
 where
-    T: Clone,
+    T: Eq + Display + Clone,
 {
-    pub(crate) origin: OpID,
-    pub(crate) id: OpID,
-    pub(crate) is_deleted: bool,
-    pub(crate) content: Option<T>,
-}
-
-impl<T> Op<T>
-where
-    T: Clone,
-{
-    pub fn author(&self) -> AuthorID {
-        self.id.0
-    }
-
-    pub fn sequence_num(&self) -> SequenceNumber {
-        self.id.1
-    }
-}
-
-impl<'a, T> ListCRDT<'a, T>
-where
-    T: Eq + Clone + Display,
-{
-    pub fn new(arena_ref: &'a bumpalo::Bump, id: AuthorID) -> ListCRDT<'a, T> {
-        let mut splaytree = SplayTree::default();
-        let mut id_to_ref = BTreeMap::new();
-        let root_node = Node::new(arena_ref, ROOT_ID, None, None, &mut splaytree);
-        id_to_ref.insert(ROOT_ID, root_node);
+    /// Create a new List CRDT with the given AuthorID.
+    /// AuthorID should be unique.
+    pub fn new(id: AuthorID) -> ListCRDT<T> {
+        let mut ops = Vec::new();
+        ops.push(Op::make_root());
         let mut logical_clocks = BTreeMap::new();
         logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
-            arena_ref,
-            id_to_ref,
-            splaytree,
+            ops,
             message_q: BTreeMap::new(),
             logical_clocks,
-            size: 0,
+            highest_seq: 0,
         }
     }
 
-    pub fn sequence_num(&self) -> SequenceNumber {
+    /// Get our own sequence number
+    pub fn our_seq(&self) -> SequenceNumber {
         *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
-    fn get_sequence_number(&mut self, id: AuthorID) -> SequenceNumber {
+    /// Find the sequence number for peer with a given [`AuthorID`]
+    fn lookup_seq(&mut self, id: AuthorID) -> SequenceNumber {
         let val = self.logical_clocks.entry(id).or_insert(0);
         *val
     }
 
-    fn update_sequence_num(&mut self, id: AuthorID, new_seq: SequenceNumber) {
-        let new_seq_num = max(self.get_sequence_number(id), new_seq);
-        self.logical_clocks.insert(id, new_seq_num);
+    /// Update the sequence number for peer with a given [`AuthorID`] to [`new_seq`]
+    fn update_seq(&mut self, id: AuthorID, new_seq: SequenceNumber) {
+        let new_seq_num = max(self.lookup_seq(id), new_seq);
+        self.highest_seq = max(self.highest_seq, new_seq_num);
     }
 
+    /// Locally insert some content causally after the given operation
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
-        let id = (self.our_id, self.sequence_num() + 1);
+        let id = (self.our_id, self.our_seq() + 1);
         let op = Op {
             id,
+            seq: self.highest_seq + 1,
             origin: after,
             is_deleted: false,
             content: Some(content),
@@ -96,17 +77,30 @@ where
         op
     }
 
+    /// Mark a
     pub fn delete(&mut self, id: OpID) {
-        // TODO(1): actually implement delete
-        todo!();
+        // let maybe_idx = self.find(id);
+        // if let Some(idx) = maybe_idx {
+        //     self.ops[idx].is_deleted = true;
+        // }
+        // TODO(0): generate an Op from this that we can broadcast
     }
 
+    /// Find the idx of an operation with the given [`OpID`]
+    pub(crate) fn find(&self, id: OpID) -> Option<usize> {
+        self.ops.iter().position(|op| op.id == id)
+    }
+
+    /// Apply an operation (both local and remote) to this local list CRDT.
+    /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
     pub fn apply(&mut self, op: Op<T>) {
-        let new_seq_num = op.sequence_num();
-        let origin = self.id_to_ref.get(&op.origin).copied();
+        let op_id = op.id;
+        let (agent, agent_seq) = op_id;
+        let global_seq = op.sequence_num();
+        let origin_id = self.find(op.origin);
 
         // we haven't received the causal parent of this operation yet, queue this it up for later
-        if origin.is_none() {
+        if origin_id.is_none() {
             self.message_q
                 .entry(op.origin)
                 .or_insert(Vec::new())
@@ -115,29 +109,17 @@ where
         }
 
         // TODO(1): check elt_is_deleted to handle delete case properly
-        println!(
-            "{} Performing an insert of {}: '{}' after {}",
-            display_author(self.our_id),
-            display_op(op.id),
-            op.content.as_ref().unwrap(),
-            display_op(op.origin)
-        );
-        let new_node = Node::new(
-            self.arena_ref,
-            op.id,
-            origin,
-            op.content,
-            &mut self.splaytree,
-        );
-        self.id_to_ref.insert(op.id, new_node);
-        self.update_sequence_num(self.our_id, new_seq_num);
-        println!("{}", self.splaytree.print(Some(op.id)));
-        if !op.is_deleted {
-            self.size += 1;
-        }
+        // actual insert
+        self.log_apply(&op);
+        self.integrate(op);
+        self.logical_clocks.insert(agent, agent_seq);
+        self.update_seq(self.our_id, global_seq);
+
+        // log result
+        self.log_ops(Some(op_id));
 
         // apply all of its causal dependents if there are any
-        let dependent_queue = self.message_q.remove(&op.id);
+        let dependent_queue = self.message_q.remove(&op_id);
         if let Some(mut q) = dependent_queue {
             for dependent in q.drain(..) {
                 self.apply(dependent);
@@ -145,12 +127,63 @@ where
         }
     }
 
-    pub fn traverse_collect(&self) -> Vec<&T> {
-        self.splaytree.traverse_collect()
+    /// Main CRDT logic of integrating an op properly into our local log
+    /// without causing conflicts. This is basically a really fancy
+    /// insertion sort.
+    ///
+    /// Effectively, we
+    /// 1) find the parent item
+    /// 2) find the right spot to insert before the next node
+    fn integrate(&mut self, new_op: Op<T>) {
+        // get index of the new op's origin
+        let new_op_parent_idx = self.find(new_op.origin).unwrap();
+
+        // start looking from right after parent
+        // stop when we reach end of document
+        let mut i = new_op_parent_idx + 1;
+        while i < self.ops.len() {
+            let op = &self.ops[i];
+            let op_parent_idx = self.find(op.origin).unwrap();
+
+            // first, lets compare causal origins
+            match new_op_parent_idx.cmp(&op_parent_idx) {
+                // if index of our parent > index of other parent, we are bigger (ok to insert)
+                Ordering::Greater => break,
+                // our parents our equal, we are siblings
+                // siblings are sorted first by sequence number then by author id
+                Ordering::Equal => {
+                    match new_op.seq.cmp(&op.seq) {
+                        Ordering::Greater => break,
+                        Ordering::Equal => {
+                            // conflict, resolve arbitrarily but deterministically by breaking on
+                            // author
+                            if new_op.author() < op.author() {
+                                break;
+                            }
+                        }
+                        Ordering::Less => {}
+                    }
+                }
+                // our parent is less than theirs,
+                Ordering::Less => {}
+            }
+            i += 1;
+        }
+
+        // insert at i
+        self.ops.insert(i, new_op);
     }
 
-    pub fn print(&self) -> String {
-        self.splaytree.print(None)
+    /// Make an iterator out of list CRDT contents, ignoring deleted items and empty content
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.ops
+            .iter()
+            .filter(|op| !op.is_deleted && op.content.is_some())
+            .map(|op| op.content.as_ref().unwrap())
+    }
+
+    pub fn view(&self) -> Vec<&T> {
+        self.iter().collect()
     }
 }
 
@@ -158,36 +191,33 @@ where
 mod test {
     use crate::{
         list_crdt::{ListCRDT, Op, OpID},
-        splay::node::{AuthorID, ROOT_ID},
+        op::{AuthorID, ROOT_ID},
     };
     use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
     #[test]
     fn test_simple() {
-        let arena = bumpalo::Bump::new();
-        let mut list = ListCRDT::new(&arena, 1);
+        let mut list = ListCRDT::new(1);
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
         let _four = list.insert(_one.id, 4);
-        assert_eq!(list.traverse_collect(), vec![&1, &4, &2, &3]);
+        assert_eq!(list.view(), vec![&1, &4, &2, &3]);
     }
 
     #[test]
     fn test_interweave_chars() {
-        let arena = bumpalo::Bump::new();
-        let mut list = ListCRDT::new(&arena, 1);
+        let mut list = ListCRDT::new(1);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
-        assert_eq!(list.traverse_collect(), vec![&'c', &'a', &'b']);
+        assert_eq!(list.view(), vec![&'c', &'a', &'b']);
     }
 
     #[test]
     fn test_conflicting_agents() {
-        let arena = bumpalo::Bump::new();
-        let mut list1 = ListCRDT::new(&arena, 1);
-        let mut list2 = ListCRDT::new(&arena, 2);
+        let mut list1 = ListCRDT::new(1);
+        let mut list2 = ListCRDT::new(2);
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -202,8 +232,19 @@ mod test {
         list1.apply(_2_y);
         list1.apply(_2_d);
 
-        assert_eq!(list1.traverse_collect(), vec![&'d', &'a', &'b', &'y', &'x']);
-        assert_eq!(list1.traverse_collect(), list2.traverse_collect());
+        assert_eq!(list1.view(), vec![&'d', &'a', &'b', &'y', &'x']);
+        assert_eq!(list1.view(), list2.view());
+    }
+
+    #[test]
+    fn test_nested() {
+        let mut list1 = ListCRDT::new(1);
+        let _c = list1.insert(ROOT_ID, 'c');
+        let _a = list1.insert(ROOT_ID, 'a');
+        let _d = list1.insert(_c.id, 'd');
+        let _b = list1.insert(_a.id, 'b');
+
+        assert_eq!(list1.view(), vec![&'a', &'b', &'c', &'d']);
     }
 
     fn random_op<T: Clone>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
@@ -212,42 +253,44 @@ mod test {
 
     #[test]
     fn test_fuzz_commutative_property() {
-        let n: usize = 1;
+        let n: usize = 500;
         let mut rng = rand::thread_rng();
         for _ in 0..n {
-            let arena = bumpalo::Bump::new();
-            let mut op_log = Vec::<Op<char>>::new();
+            let mut op_log1 = Vec::<Op<char>>::new();
+            let mut op_log2 = Vec::<Op<char>>::new();
             let auth1: AuthorID = rng.gen();
             let auth2: AuthorID = rng.gen();
-            let mut l1 = ListCRDT::<char>::new(&arena, auth1);
-            let mut l2 = ListCRDT::<char>::new(&arena, auth2);
-            let mut chk = ListCRDT::<char>::new(&arena, rng.gen());
-            for _ in 0..rng.gen_range(4..5) {
+            println!("author 1: {:?}, author 2: {:?}", auth1, auth2);
+            let mut l1 = ListCRDT::<char>::new(auth1);
+            let mut l2 = ListCRDT::<char>::new(auth2);
+            let mut chk = ListCRDT::<char>::new(rng.gen());
+            for _ in 0..rng.gen_range(3..10000) {
                 let letter1: char = rng.gen_range(b'a'..b'z') as char;
                 let letter2: char = rng.gen_range(b'a'..b'z') as char;
-                let op1 = l1.insert(random_op(&op_log, &mut rng), letter1);
-                let op2 = l2.insert(random_op(&op_log, &mut rng), letter2);
-                op_log.push(op1);
-                op_log.push(op2);
+                let op1 = l1.insert(random_op(&op_log1, &mut rng), letter1);
+                let op2 = l2.insert(random_op(&op_log2, &mut rng), letter2);
+                op_log1.push(op1);
+                op_log2.push(op2);
             }
 
             // shuffle ops
-            op_log.shuffle(&mut rng);
+            op_log1.shuffle(&mut rng);
+            op_log2.shuffle(&mut rng);
 
             // apply to each other
-            for op in op_log {
-                if op.author() == auth1 {
-                    l2.apply(op)
-                } else if op.author() == auth2 {
-                    l1.apply(op)
-                }
-                chk.apply(op)
+            for op in op_log1 {
+                l2.apply(op);
+                chk.apply(op);
+            }
+            for op in op_log2 {
+                l1.apply(op);
+                chk.apply(op);
             }
 
             // ensure all equal
-            let l1_doc = l1.traverse_collect();
-            let l2_doc = l2.traverse_collect();
-            let chk_doc = chk.traverse_collect();
+            let l1_doc = l1.view();
+            let l2_doc = l2.view();
+            let chk_doc = chk.view();
             assert_eq!(l1_doc, l2_doc);
             assert_eq!(l1_doc, chk_doc);
             assert_eq!(l2_doc, chk_doc);
