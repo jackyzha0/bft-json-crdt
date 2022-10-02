@@ -189,11 +189,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        list_crdt::{ListCRDT, Op, OpID},
-        op::{AuthorID, ROOT_ID},
-    };
-    use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
+    use crate::{list_crdt::ListCRDT, op::ROOT_ID};
 
     #[test]
     fn test_simple() {
@@ -245,55 +241,5 @@ mod test {
         let _b = list1.insert(_a.id, 'b');
 
         assert_eq!(list1.view(), vec![&'a', &'b', &'c', &'d']);
-    }
-
-    fn random_op<T: Clone>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
-        arr.choose(rng).map(|op| op.id).unwrap_or(ROOT_ID)
-    }
-
-    #[test]
-    fn test_fuzz_commutative_property() {
-        let n: usize = 500;
-        let mut rng = rand::thread_rng();
-        for _ in 0..n {
-            let mut op_log1 = Vec::<Op<char>>::new();
-            let mut op_log2 = Vec::<Op<char>>::new();
-            let auth1: AuthorID = rng.gen();
-            let auth2: AuthorID = rng.gen();
-            println!("author 1: {:?}, author 2: {:?}", auth1, auth2);
-            let mut l1 = ListCRDT::<char>::new(auth1);
-            let mut l2 = ListCRDT::<char>::new(auth2);
-            let mut chk = ListCRDT::<char>::new(rng.gen());
-            for _ in 0..rng.gen_range(3..10000) {
-                let letter1: char = rng.gen_range(b'a'..b'z') as char;
-                let letter2: char = rng.gen_range(b'a'..b'z') as char;
-                let op1 = l1.insert(random_op(&op_log1, &mut rng), letter1);
-                let op2 = l2.insert(random_op(&op_log2, &mut rng), letter2);
-                op_log1.push(op1);
-                op_log2.push(op2);
-            }
-
-            // shuffle ops
-            op_log1.shuffle(&mut rng);
-            op_log2.shuffle(&mut rng);
-
-            // apply to each other
-            for op in op_log1 {
-                l2.apply(op);
-                chk.apply(op);
-            }
-            for op in op_log2 {
-                l1.apply(op);
-                chk.apply(op);
-            }
-
-            // ensure all equal
-            let l1_doc = l1.view();
-            let l2_doc = l2.view();
-            let chk_doc = chk.view();
-            assert_eq!(l1_doc, l2_doc);
-            assert_eq!(l1_doc, chk_doc);
-            assert_eq!(l2_doc, chk_doc);
-        }
     }
 }

@@ -7,6 +7,7 @@ use crate::{
 use colored::Colorize;
 use random_color::{Luminosity, RandomColor};
 
+const ENABLE_LOGGING: bool = false;
 pub fn display_op_id(op: OpID) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
@@ -35,6 +36,10 @@ where
     T: Display + Clone + Eq,
 {
     pub fn log_ops(&self, highlight: Option<OpID>) {
+        if !ENABLE_LOGGING {
+            return;
+        }
+
         let mut lines = Vec::<String>::new();
 
         // do in-order traversal
@@ -125,6 +130,10 @@ where
     }
 
     pub fn log_apply(&self, op: &Op<T>) {
+        if !ENABLE_LOGGING {
+            return;
+        }
+
         println!(
             "{} Performing an insert of {}@{}: '{}' after {}",
             display_author(self.our_id),

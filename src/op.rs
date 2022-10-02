@@ -1,6 +1,6 @@
 
 /// Represents the ID of a unique node
-pub type AuthorID = u8;
+pub type AuthorID = u64;
 
 /// A lamport clock timestamp. Used to track document versions
 pub type SequenceNumber = u64;
