@@ -157,11 +157,11 @@ where
                 // our parents our equal, we are siblings
                 // siblings are sorted first by sequence number then by author id
                 Ordering::Equal => {
-                    match new_op.seq.cmp(&op.seq) {
+                    match new_op.sequence_num().cmp(&op.sequence_num()) {
                         Ordering::Greater => break,
                         Ordering::Equal => {
-                            // conflict, resolve arbitrarily but deterministically by breaking on
-                            // author
+                            // conflict, resolve arbitrarily but deterministically 
+                            // tie-break on author id as that is unique
                             if new_op.author() < op.author() {
                                 break;
                             }
@@ -187,6 +187,7 @@ where
             .map(|op| op.content.as_ref().unwrap())
     }
 
+    /// Convenience function to get a vector of visible list elements
     pub fn view(&self) -> Vec<&T> {
         self.iter().collect()
     }

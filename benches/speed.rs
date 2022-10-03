@@ -1,9 +1,9 @@
 #![feature(test)]
 
 extern crate test;
+use test::Bencher;
 use bft_json_crdt::{list_crdt::ListCRDT, op::Op, op::ROOT_ID};
 use rand::{seq::SliceRandom, Rng};
-use test::Bencher;
 
 #[bench]
 fn bench_insert_1_000_root(b: &mut Bencher) {

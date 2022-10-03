@@ -9,6 +9,7 @@ pub type SequenceNumber = u64;
 pub type OpID = (AuthorID, SequenceNumber);
 pub const ROOT_ID: OpID = (0, 0);
 
+/// Represents a single node in the List CRDT
 #[derive(Clone, Copy)]
 pub struct Op<T>
 where
@@ -30,9 +31,10 @@ where
     }
 
     pub fn sequence_num(&self) -> SequenceNumber {
-        self.id.1
+        self.seq
     }
 
+    /// Special constructor for defining the sentinel root node
     pub fn make_root() -> Op<T> {
         Self {
             origin: ROOT_ID,
