@@ -46,8 +46,6 @@ fn bench_trace(b: &mut Bencher) {
         ops.push(ROOT_ID);
         for op in t.edits.to_vec() {
             let origin = ops[op.pos];
-
-            println!("origin: {:?} with op {:?}", origin, op);
             if op.delete {
                 let delete_op = list.delete(origin);
                 ops.push(delete_op.id);
@@ -55,11 +53,10 @@ fn bench_trace(b: &mut Bencher) {
                 let new_op = list.insert(origin, op.content.unwrap());
                 ops.push(new_op.id);
             }
-            println!("  -> pushed: {:?}", ops.last());
         }
         let result = list.iter().collect::<String>();
         let expected = t.final_text;
-        // assert_eq!(result.len(), expected.len());
+        assert_eq!(result.len(), expected.len());
         assert_eq!(result, expected);
     })
 }

@@ -51,20 +51,9 @@ where
         *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
-    /// Find the sequence number for peer with a given [`AuthorID`]
-    fn lookup_seq(&mut self, id: AuthorID) -> SequenceNumber {
-        let val = self.logical_clocks.entry(id).or_insert(0);
-        *val
-    }
-
-    /// Update the sequence number for peer with a given [`AuthorID`] to [`new_seq`]
-    fn update_seq(&mut self, id: AuthorID, new_seq: SequenceNumber) {
-    }
-
     /// Locally insert some content causally after the given operation
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
         let id = (self.our_id, self.our_seq() + 1);
-        println!("generating id {:?}", id);
         let op = Op {
             id,
             seq: self.highest_seq + 1,
@@ -93,7 +82,6 @@ where
     /// Apply an operation (both local and remote) to this local list CRDT.
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
     pub fn apply(&mut self, op: Op<T>) {
-        println!("applying op with id {:?}", op.id);
         let op_id = op.id;
         let (agent, agent_seq) = op_id;
         let global_seq = op.sequence_num();
@@ -111,7 +99,6 @@ where
         // integrate operation locally and update bookkeeping
         self.log_apply(&op);
         self.integrate(op);
-        println!("agent: {}, global: {}", agent_seq, global_seq);
 
         // update sequence number for sender
         self.logical_clocks.insert(agent, agent_seq);
@@ -146,19 +133,12 @@ where
         // start looking from right after parent
         // stop when we reach end of document
         let mut i = new_op_parent_idx + 1;
-        println!("  integrating op starting at i={}", i);
         while i < self.ops.len() {
             let op = &self.ops[i];
             let op_parent_idx = self.find(op.origin).unwrap();
 
             // if we are the same node, just replace (guarantees idempotency)
             if op.id == new_op.id {
-                if !new_op.is_deleted {
-                    println!(
-                        "  ?? found duplicate node of id {:?}=={:?}",
-                        op.id, new_op.id
-                    );
-                }
                 self.ops[i] = new_op;
                 return;
             }
@@ -189,7 +169,6 @@ where
         }
 
         // insert at i
-        println!("  @ i={}", i);
         self.ops.insert(i, new_op);
     }
 
