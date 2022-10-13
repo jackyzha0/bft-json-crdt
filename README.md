@@ -17,7 +17,7 @@ Benchmarking happened on a 2019 Macbook Pro with a 2.6GHz i7.
 Numbers are compared to  which report their performance benchmarks [here](https://github.com/automerge/automerge-perf)
 
 | # Ops | Raw String (JS) | Ours (basic) | Ours (BFT) | Automerge |
-|--|--|--|--|
-|10k       | -     | 0.085s  | - | 1.6s    |
-|100k      | -     | 11.321s | - | 43.0s   |
-|All (259k)| 0.61s | 110.040s| - | Timeout |
+|--|--|--|--|--|
+|10k       | n/a     | 0.085s  | n/a | 1.6s        |
+|100k      | n/a     | 11.321s | n/a | 43.0s       |
+|All (259k)| 0.61s | 110.040s  | n/a | Timeout/OOM |
