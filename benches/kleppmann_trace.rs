@@ -11,7 +11,7 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Edit {
-    idx: usize,
+    pos: usize,
     delete: bool,
     #[serde(default)]
     content: Option<char>,
@@ -30,7 +30,8 @@ fn get_trace() -> Trace {
         Err(e) => panic!("Open edits.json failed: {:?}", e.kind()),
         Ok(mut file) => {
             let mut content: String = String::new();
-            file.read_to_string(&mut content).expect("Problem reading file");
+            file.read_to_string(&mut content)
+                .expect("Problem reading file");
             serde_json::from_str(&content).expect("JSON was not well-formatted")
         }
     }
@@ -44,14 +45,21 @@ fn bench_trace(b: &mut Bencher) {
         let mut ops: Vec<OpID> = Vec::new();
         ops.push(ROOT_ID);
         for op in t.edits.to_vec() {
-            let origin = ops[op.idx - 1];
+            let origin = ops[op.pos];
+
+            println!("origin: {:?} with op {:?}", origin, op);
             if op.delete {
-                list.delete(ops[op.idx]);
+                let delete_op = list.delete(origin);
+                ops.push(delete_op.id);
             } else {
                 let new_op = list.insert(origin, op.content.unwrap());
                 ops.push(new_op.id);
             }
+            println!("  -> pushed: {:?}", ops.last());
         }
-        assert_eq!(list.iter().collect::<String>(), t.final_text);
+        let result = list.iter().collect::<String>();
+        let expected = t.final_text;
+        // assert_eq!(result.len(), expected.len());
+        assert_eq!(result, expected);
     })
 }

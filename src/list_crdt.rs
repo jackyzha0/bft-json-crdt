@@ -59,13 +59,12 @@ where
 
     /// Update the sequence number for peer with a given [`AuthorID`] to [`new_seq`]
     fn update_seq(&mut self, id: AuthorID, new_seq: SequenceNumber) {
-        let new_seq_num = max(self.lookup_seq(id), new_seq);
-        self.highest_seq = max(self.highest_seq, new_seq_num);
     }
 
     /// Locally insert some content causally after the given operation
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
         let id = (self.our_id, self.our_seq() + 1);
+        println!("generating id {:?}", id);
         let op = Op {
             id,
             seq: self.highest_seq + 1,
@@ -94,6 +93,7 @@ where
     /// Apply an operation (both local and remote) to this local list CRDT.
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
     pub fn apply(&mut self, op: Op<T>) {
+        println!("applying op with id {:?}", op.id);
         let op_id = op.id;
         let (agent, agent_seq) = op_id;
         let global_seq = op.sequence_num();
@@ -111,8 +111,14 @@ where
         // integrate operation locally and update bookkeeping
         self.log_apply(&op);
         self.integrate(op);
+        println!("agent: {}, global: {}", agent_seq, global_seq);
+
+        // update sequence number for sender
         self.logical_clocks.insert(agent, agent_seq);
-        self.update_seq(self.our_id, global_seq);
+
+        // update our id
+        self.highest_seq = max(self.highest_seq, global_seq);
+        self.logical_clocks.insert(self.our_id, self.highest_seq);
 
         // log result
         self.log_ops(Some(op_id));
@@ -140,12 +146,19 @@ where
         // start looking from right after parent
         // stop when we reach end of document
         let mut i = new_op_parent_idx + 1;
+        println!("  integrating op starting at i={}", i);
         while i < self.ops.len() {
             let op = &self.ops[i];
             let op_parent_idx = self.find(op.origin).unwrap();
 
             // if we are the same node, just replace (guarantees idempotency)
             if op.id == new_op.id {
+                if !new_op.is_deleted {
+                    println!(
+                        "  ?? found duplicate node of id {:?}=={:?}",
+                        op.id, new_op.id
+                    );
+                }
                 self.ops[i] = new_op;
                 return;
             }
@@ -160,7 +173,7 @@ where
                     match new_op.sequence_num().cmp(&op.sequence_num()) {
                         Ordering::Greater => break,
                         Ordering::Equal => {
-                            // conflict, resolve arbitrarily but deterministically 
+                            // conflict, resolve arbitrarily but deterministically
                             // tie-break on author id as that is unique
                             if new_op.author() < op.author() {
                                 break;
@@ -176,6 +189,7 @@ where
         }
 
         // insert at i
+        println!("  @ i={}", i);
         self.ops.insert(i, new_op);
     }
 
@@ -206,7 +220,7 @@ mod test {
         let _four = list.insert(_one.id, 4);
         assert_eq!(list.view(), vec![&1, &4, &2, &3]);
     }
-    
+
     #[test]
     fn test_idempotence() {
         let mut list = ListCRDT::new(1);
@@ -258,7 +272,7 @@ mod test {
         assert_eq!(list1.view(), vec![&'d', &'a', &'b', &'y', &'x']);
         assert_eq!(list1.view(), list2.view());
     }
-    
+
     #[test]
     fn test_delete_multiple_agent() {
         let mut list1 = ListCRDT::new(1);
