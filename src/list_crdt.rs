@@ -1,7 +1,7 @@
 use crate::op::*;
 use std::{
     cmp::{max, Ordering},
-    collections::BTreeMap,
+    collections::HashMap,
     fmt::Display,
 };
 
@@ -15,12 +15,14 @@ where
     /// List of all the operations we know of
     pub(crate) ops: Vec<Op<T>>,
 
+    /// A map of OpID -> index in
+
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
-    message_q: BTreeMap<OpID, Vec<Op<T>>>,
+    message_q: HashMap<OpID, Vec<Op<T>>>,
 
     /// Keeps track of the latest document version we know for each peer
-    logical_clocks: BTreeMap<AuthorID, SequenceNumber>,
+    logical_clocks: HashMap<AuthorID, SequenceNumber>,
 
     /// Highest document version we've seen
     highest_seq: SequenceNumber,
@@ -35,12 +37,12 @@ where
     pub fn new(id: AuthorID) -> ListCRDT<T> {
         let mut ops = Vec::new();
         ops.push(Op::make_root());
-        let mut logical_clocks = BTreeMap::new();
+        let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
             ops,
-            message_q: BTreeMap::new(),
+            message_q: HashMap::new(),
             logical_clocks,
             highest_seq: 0,
         }
@@ -135,6 +137,11 @@ where
         let mut i = new_op_parent_idx + 1;
         while i < self.ops.len() {
             let op = &self.ops[i];
+
+            if new_op.sequence_num() > op.sequence_num() {
+                break;
+            }
+
             let op_parent_idx = self.find(op.origin).unwrap();
 
             // if we are the same node, just replace (guarantees idempotency)
@@ -145,11 +152,10 @@ where
 
             // first, lets compare causal origins
             match new_op_parent_idx.cmp(&op_parent_idx) {
-                // if index of our parent > index of other parent, we are bigger (ok to insert)
                 Ordering::Greater => break,
-                // our parents our equal, we are siblings
-                // siblings are sorted first by sequence number then by author id
                 Ordering::Equal => {
+                    // our parents our equal, we are siblings
+                    // siblings are sorted first by sequence number then by author id
                     match new_op.sequence_num().cmp(&op.sequence_num()) {
                         Ordering::Greater => break,
                         Ordering::Equal => {
@@ -159,11 +165,10 @@ where
                                 break;
                             }
                         }
-                        Ordering::Less => {}
+                        Ordering::Less => (),
                     }
                 }
-                // our parent is less than theirs,
-                Ordering::Less => {}
+                Ordering::Less => (),
             }
             i += 1;
         }

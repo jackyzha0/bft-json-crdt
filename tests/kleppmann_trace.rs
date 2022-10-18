@@ -37,12 +37,13 @@ fn get_trace() -> Trace {
 #[test]
 fn test_editing_trace() {
     let t = get_trace();
-    let mut list = ListCRDT::new(1);
+    let mut list = ListCRDT::<char>::new(1);
     let mut ops: Vec<OpID> = Vec::new();
     ops.push(ROOT_ID);
     let start = PreciseTime::now();
-    let edits = t.edits.to_vec();
-    for (i, op) in edits.iter().enumerate() {
+    let edits = t.edits;
+    let mut i = 0;
+    for op in edits {
         let origin = ops[op.pos];
         if op.delete {
             let delete_op = list.delete(origin);
@@ -60,6 +61,7 @@ fn test_editing_trace() {
             }
             _ => {}
         };
+        i += 1;
     }
 
     let end = PreciseTime::now();

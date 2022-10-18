@@ -21,9 +21,9 @@ Numbers are compared to  which report their performance benchmarks [here](https:
 
 | # Ops | Raw String (JS) | Ours (basic) | Ours (BFT) | Automerge |
 |--|--|--|--|--|
-|10k       | n/a     | 0.085s  | n/a | 1.6s        |
-|100k      | n/a     | 11.321s | n/a | 43.0s       |
-|All (259k)| 0.61s | 110.040s  | n/a | Timeout/OOM |
+|10k       | n/a     | 0.081s  | n/a | 1.6s        |
+|100k      | n/a     | 9.321s | n/a | 43.0s       |
+|All (259k)| 0.61s | 88.610s  | n/a | Timeout/OOM |
 
 ## Further Work 
 This is mostly a learning/instructional project but there are a few places where performance improvements are obvious

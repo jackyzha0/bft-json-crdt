@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     list_crdt::ListCRDT,
@@ -54,7 +54,7 @@ where
         }
 
         // figure out parent-child hierarchies from origins
-        let mut parent_child_map: BTreeMap<OpID, Vec<OpID>> = BTreeMap::new();
+        let mut parent_child_map: HashMap<OpID, Vec<OpID>> = HashMap::new();
         for op in &res {
             let children = parent_child_map.entry(op.origin).or_insert(Vec::new());
             children.push(op.id);
