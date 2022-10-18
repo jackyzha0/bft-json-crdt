@@ -58,7 +58,8 @@ where
         let id = (self.our_id, self.our_seq() + 1);
         let op = Op {
             id,
-            seq: self.highest_seq + 1,
+            author: self.our_id,
+            seq: self.our_seq() + 1,
             origin: after,
             is_deleted: false,
             content: Some(content),
@@ -85,8 +86,8 @@ where
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
     pub fn apply(&mut self, op: Op<T>) {
         let op_id = op.id;
-        let (agent, agent_seq) = op_id;
-        let global_seq = op.sequence_num();
+        let author = op.author();
+        let seq = op.sequence_num();
         let origin_id = self.find(op.origin);
 
         // we haven't received the causal parent of this operation yet, queue this it up for later
@@ -103,10 +104,10 @@ where
         self.integrate(op);
 
         // update sequence number for sender
-        self.logical_clocks.insert(agent, agent_seq);
+        self.logical_clocks.insert(author, seq);
 
         // update our id
-        self.highest_seq = max(self.highest_seq, global_seq);
+        self.highest_seq = max(self.highest_seq, seq);
         self.logical_clocks.insert(self.our_id, self.highest_seq);
 
         // log result

@@ -1,4 +1,3 @@
-
 /// Represents the ID of a unique node
 pub type AuthorID = u64;
 
@@ -17,6 +16,7 @@ where
 {
     pub origin: OpID,
     pub id: OpID,
+    pub author: AuthorID,
     pub seq: SequenceNumber,
     pub is_deleted: bool,
     pub content: Option<T>,
@@ -27,7 +27,7 @@ where
     T: Clone,
 {
     pub fn author(&self) -> AuthorID {
-        self.id.0
+        self.author
     }
 
     pub fn sequence_num(&self) -> SequenceNumber {
@@ -39,10 +39,10 @@ where
         Self {
             origin: ROOT_ID,
             id: ROOT_ID,
-            seq: 0,
+            author: ROOT_ID.0,
+            seq: ROOT_ID.1,
             is_deleted: false,
             content: None,
         }
     }
 }
-

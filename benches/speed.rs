@@ -6,21 +6,21 @@ use bft_json_crdt::{list_crdt::ListCRDT, op::Op, op::ROOT_ID};
 use rand::{seq::SliceRandom, Rng};
 
 #[bench]
-fn bench_insert_10_000_root(b: &mut Bencher) {
+fn bench_insert_1_000_root(b: &mut Bencher) {
     b.iter(|| {
         let mut list = ListCRDT::new(1);
-        for i in 0..10_000 {
+        for i in 0..1_000 {
             list.insert(ROOT_ID, i);
         }
     })
 }
 
 #[bench]
-fn bench_insert_10_000_linear(b: &mut Bencher) {
+fn bench_insert_1_000_linear(b: &mut Bencher) {
     b.iter(|| {
         let mut list = ListCRDT::new(1);
         let mut prev = ROOT_ID;
-        for i in 0..10_000 {
+        for i in 0..1_000 {
             let op = list.insert(prev, i);
             prev = op.id;
         }
