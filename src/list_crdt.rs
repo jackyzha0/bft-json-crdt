@@ -55,15 +55,7 @@ where
 
     /// Locally insert some content causally after the given operation
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
-        let id = (self.our_id, self.our_seq() + 1);
-        let op = Op {
-            id,
-            author: self.our_id,
-            seq: self.our_seq() + 1,
-            origin: after,
-            is_deleted: false,
-            content: Some(content),
-        };
+        let op = Op::new(after, self.our_id, self.our_seq() + 1, false, content);
         self.apply(op.clone());
         op
     }
@@ -138,16 +130,13 @@ where
         let mut i = new_op_parent_idx + 1;
         while i < self.ops.len() {
             let op = &self.ops[i];
-
-            if new_op.sequence_num() > op.sequence_num() {
-                break;
-            }
-
             let op_parent_idx = self.find(op.origin).unwrap();
 
-            // if we are the same node, just replace (guarantees idempotency)
-            if op.id == new_op.id {
-                self.ops[i] = new_op;
+            // if we are the same node, only thing that could have changed is if this node was
+            // marked as deleted 
+            if op.hash() == new_op.hash() {
+                // remove-wins (RW) strategy
+                self.ops[i].is_deleted = op.is_deleted || new_op.is_deleted;
                 return;
             }
 

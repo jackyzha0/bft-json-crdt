@@ -13,15 +13,15 @@ fn author_to_hex(author: AuthorID) -> String {
     format!("{:#x}", author).to_string()
 }
 
-pub fn display_op_id(op: OpID) -> String {
+pub fn display_op_id<T: Clone>(op: &Op<T>) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
-        .seed(op.0 as u32 + 4)
+        .seed(op.author as u32 + 4)
         .to_rgb_array();
     format!(
         "[{},{}]",
-        author_to_hex(op.0).bold().truecolor(r, g, b),
-        op.1.to_string().yellow()
+        author_to_hex(op.author).bold().truecolor(r, g, b),
+        op.seq.to_string().yellow()
     )
 }
 
@@ -116,7 +116,7 @@ where
                     "{}{}{} {} {}",
                     prefixes,
                     cur_char,
-                    display_op_id(op.id),
+                    display_op_id(op),
                     content.strikethrough().red(),
                     highlight_text
                 ));
@@ -125,7 +125,7 @@ where
                     "{}{}{} {} {}",
                     prefixes,
                     cur_char,
-                    display_op_id(op.id),
+                    display_op_id(op),
                     content,
                     highlight_text
                 ));
@@ -154,7 +154,7 @@ where
             println!(
                 "{} Performing a delete of {}@{}",
                 display_author(self.our_id),
-                display_op_id(op.id),
+                display_op_id(op),
                 op.sequence_num(),
             );
             return;
@@ -163,10 +163,10 @@ where
         println!(
             "{} Performing an insert of {}@{}: '{}' after {}",
             display_author(self.our_id),
-            display_op_id(op.id),
+            display_op_id(op),
             op.sequence_num(),
             op.content.as_ref().unwrap(),
-            display_op_id(op.origin)
+            display_op_id(op)
         );
     }
 }
