@@ -10,8 +10,7 @@ The goal is to show a working prototype that demonstrated in simple code the ide
 
 Unlike most other CRDT implementations, I leave out many performance optimizations that would make the basic algorithm harder to understand.
 
-## WTF is a CRDT??
-coming soon
+Check out the [accompanying blog post for this project!](https://jzhao.xyz/posts/bft-json-crdt)
 
 ## Benchmarks
 Altough this implementation does not optimize for performance, it still nonetheless performs quite well.
@@ -25,7 +24,8 @@ Numbers are compared to  which report their performance benchmarks [here](https:
 |100k      | n/a     | 9.321s | n/a | 43.0s       |
 |All (259k)| 0.61s | 88.610s  | n/a | Timeout/OOM |
 
-To run these on MacOS, run:
+## Flamegraph
+To get some flamegraphs of the time graph on MacOS, run:
 
 ```bash
 sudo cargo flamegraph --dev --root --bench speed
