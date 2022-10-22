@@ -1,15 +1,16 @@
 use sha2::Digest;
 use sha2::Sha256;
-use std::fmt::{format, Display};
+use std::fmt::Display;
 
-/// Represents the ID of a unique node
-pub type AuthorID = u64;
+use crate::keypair::AuthorID;
+
 
 /// A lamport clock timestamp. Used to track document versions
 pub type SequenceNumber = u64;
 
 /// A unique ID for a single [`Op<T>`]
 pub type OpID = [u8; 32];
+
 pub const ROOT_ID: OpID = [0u8; 32];
 
 /// Represents a single node in the List CRDT
@@ -19,7 +20,7 @@ where
     T: Clone,
 {
     pub origin: OpID,
-    pub id: OpID,
+    pub id: OpID, // this is also the hash of the operation
     pub author: AuthorID,
     pub seq: SequenceNumber,
     pub is_deleted: bool,
@@ -67,12 +68,16 @@ where
         bytes
     }
 
+    pub fn valid_hash(&self) -> bool {
+        self.hash() == self.id
+    }
+
     /// Special constructor for defining the sentinel root node
     pub fn make_root() -> Op<T> {
         Self {
             origin: ROOT_ID,
             id: ROOT_ID,
-            author: 0,
+            author: [0u8; 32],
             seq: 0,
             is_deleted: false,
             content: None,

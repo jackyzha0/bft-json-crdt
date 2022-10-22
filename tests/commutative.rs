@@ -1,4 +1,4 @@
-use bft_json_crdt::{op::{AuthorID, Op, OpID, ROOT_ID}, list_crdt::ListCRDT};
+use bft_json_crdt::{op::{Op, OpID, ROOT_ID}, list_crdt::ListCRDT};
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
 fn random_op<T: Clone>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
@@ -11,14 +11,12 @@ fn test_fuzz_commutative_property() {
     let mut op_log = Vec::<Op<char>>::new();
     let mut op_log1 = Vec::<Op<char>>::new();
     let mut op_log2 = Vec::<Op<char>>::new();
-    let auth1: AuthorID = rng.gen();
-    let auth2: AuthorID = rng.gen();
-    let mut l1 = ListCRDT::<char>::new(auth1);
-    let mut l2 = ListCRDT::<char>::new(auth2);
-    let mut chk = ListCRDT::<char>::new(rng.gen());
+    let mut l1 = ListCRDT::<char>::new();
+    let mut l2 = ListCRDT::<char>::new();
+    let mut chk = ListCRDT::<char>::new();
     for _ in 0..50 {
-        let letter1: char = rng.gen_range(b'a'..b'z') as char;
-        let letter2: char = rng.gen_range(b'a'..b'z') as char;
+        let letter1: char = rng.gen_range(b'a', b'z') as char;
+        let letter2: char = rng.gen_range(b'a', b'z') as char;
         let op1 = l1.insert(random_op(&op_log1, &mut rng), letter1);
         let op2 = l2.insert(random_op(&op_log2, &mut rng), letter2);
         op_log1.push(op1);
@@ -53,8 +51,8 @@ fn test_fuzz_commutative_property() {
     let mut op_log1 = Vec::<Op<char>>::new();
     let mut op_log2 = Vec::<Op<char>>::new();
     for _ in 0..50 {
-        let letter1: char = rng.gen_range(b'a'..b'z') as char;
-        let letter2: char = rng.gen_range(b'a'..b'z') as char;
+        let letter1: char = rng.gen_range(b'a', b'z') as char;
+        let letter2: char = rng.gen_range(b'a', b'z') as char;
         let op1 = l1.insert(random_op(&op_log, &mut rng), letter1);
         let op2 = l2.insert(random_op(&op_log, &mut rng), letter2);
         op_log1.push(op1);

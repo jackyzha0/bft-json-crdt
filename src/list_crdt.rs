@@ -1,4 +1,6 @@
-use crate::op::*;
+use ed25519_dalek::Keypair;
+
+use crate::{op::*, keypair::{AuthorID, make_keypair}};
 use std::{
     cmp::{max, Ordering},
     collections::HashMap,
@@ -9,13 +11,14 @@ pub struct ListCRDT<T>
 where
     T: Clone + Display,
 {
-    /// Our unique ID
-    pub our_id: AuthorID,
-
     /// List of all the operations we know of
     pub(crate) ops: Vec<Op<T>>,
 
-    /// A map of OpID -> index in
+    /// Public key for this node
+    pub our_id: AuthorID, 
+
+    // Ed25519 Keypair
+    keypair: Keypair,
 
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
@@ -34,13 +37,19 @@ where
 {
     /// Create a new List CRDT with the given AuthorID.
     /// AuthorID should be unique.
-    pub fn new(id: AuthorID) -> ListCRDT<T> {
+    pub fn new() -> ListCRDT<T> {
+        // seed rng and generate keypair
+        let keypair = make_keypair();
+        let id = keypair.public.to_bytes();
+
+        // initialize other fields
         let mut ops = Vec::new();
         ops.push(Op::make_root());
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
+            keypair,
             ops,
             message_q: HashMap::new(),
             logical_clocks,
@@ -81,6 +90,11 @@ where
         let author = op.author();
         let seq = op.sequence_num();
         let origin_id = self.find(op.origin);
+
+        // reject invalid hashes
+        if !op.valid_hash() {
+            return;
+        }
 
         // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin_id.is_none() {
@@ -133,8 +147,8 @@ where
             let op_parent_idx = self.find(op.origin).unwrap();
 
             // if we are the same node, only thing that could have changed is if this node was
-            // marked as deleted 
-            if op.hash() == new_op.hash() {
+            // marked as deleted
+            if op.id == new_op.id {
                 // remove-wins (RW) strategy
                 self.ops[i].is_deleted = op.is_deleted || new_op.is_deleted;
                 return;
@@ -187,7 +201,7 @@ mod test {
 
     #[test]
     fn test_simple() {
-        let mut list = ListCRDT::new(1);
+        let mut list = ListCRDT::new();
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
@@ -197,7 +211,7 @@ mod test {
 
     #[test]
     fn test_idempotence() {
-        let mut list = ListCRDT::new(1);
+        let mut list = ListCRDT::new();
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
             list.apply(op);
@@ -207,7 +221,7 @@ mod test {
 
     #[test]
     fn test_delete() {
-        let mut list = ListCRDT::new(1);
+        let mut list = ListCRDT::new();
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -218,7 +232,7 @@ mod test {
 
     #[test]
     fn test_interweave_chars() {
-        let mut list = ListCRDT::new(1);
+        let mut list = ListCRDT::new();
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -227,8 +241,8 @@ mod test {
 
     #[test]
     fn test_conflicting_agents() {
-        let mut list1 = ListCRDT::new(1);
-        let mut list2 = ListCRDT::new(2);
+        let mut list1 = ListCRDT::new();
+        let mut list2 = ListCRDT::new();
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -249,8 +263,8 @@ mod test {
 
     #[test]
     fn test_delete_multiple_agent() {
-        let mut list1 = ListCRDT::new(1);
-        let mut list2 = ListCRDT::new(2);
+        let mut list1 = ListCRDT::new();
+        let mut list2 = ListCRDT::new();
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -264,7 +278,7 @@ mod test {
 
     #[test]
     fn test_nested() {
-        let mut list1 = ListCRDT::new(1);
+        let mut list1 = ListCRDT::new();
         let _c = list1.insert(ROOT_ID, 'c');
         let _a = list1.insert(ROOT_ID, 'a');
         let _d = list1.insert(_c.id, 'd');

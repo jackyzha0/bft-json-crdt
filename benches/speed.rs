@@ -8,7 +8,7 @@ use rand::{seq::SliceRandom, Rng};
 #[bench]
 fn bench_insert_1_000_root(b: &mut Bencher) {
     b.iter(|| {
-        let mut list = ListCRDT::new(1);
+        let mut list = ListCRDT::new();
         for i in 0..1_000 {
             list.insert(ROOT_ID, i);
         }
@@ -18,7 +18,7 @@ fn bench_insert_1_000_root(b: &mut Bencher) {
 #[bench]
 fn bench_insert_1_000_linear(b: &mut Bencher) {
     b.iter(|| {
-        let mut list = ListCRDT::new(1);
+        let mut list = ListCRDT::new();
         let mut prev = ROOT_ID;
         for i in 0..1_000 {
             let op = list.insert(prev, i);
@@ -35,7 +35,7 @@ fn bench_insert_many_agents_conflicts(b: &mut Bencher) {
         let mut crdts: Vec<ListCRDT<usize>> = Vec::with_capacity(N);
         let mut logs: Vec<Op<usize>> = Vec::new();
         for i in 0..N {
-            crdts.push(ListCRDT::new(rng.gen()));
+            crdts.push(ListCRDT::new());
             for _ in 0..5 {
                 let op = crdts[i].insert(ROOT_ID, i);
                 logs.push(op);

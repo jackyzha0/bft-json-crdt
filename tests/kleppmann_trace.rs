@@ -37,7 +37,7 @@ fn get_trace() -> Trace {
 #[test]
 fn test_editing_trace() {
     let t = get_trace();
-    let mut list = ListCRDT::<char>::new(1);
+    let mut list = ListCRDT::<char>::new();
     let mut ops: Vec<OpID> = Vec::new();
     ops.push(ROOT_ID);
     let start = PreciseTime::now();

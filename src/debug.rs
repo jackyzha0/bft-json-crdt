@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     list_crdt::ListCRDT,
-    op::{AuthorID, Op, OpID, ROOT_ID},
+    op::{Op, OpID, ROOT_ID}, keypair::{AuthorID, lsb_32},
 };
 use colored::Colorize;
 use random_color::{Luminosity, RandomColor};
@@ -10,13 +10,13 @@ use random_color::{Luminosity, RandomColor};
 const ENABLE_LOGGING: bool = false;
 
 fn author_to_hex(author: AuthorID) -> String {
-    format!("{:#x}", author).to_string()
+    format!("{:#x}", lsb_32(author)).to_string()
 }
 
 pub fn display_op_id<T: Clone>(op: &Op<T>) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
-        .seed(op.author as u32 + 4)
+        .seed(lsb_32(op.author))
         .to_rgb_array();
     format!(
         "[{},{}]",
@@ -28,7 +28,7 @@ pub fn display_op_id<T: Clone>(op: &Op<T>) -> String {
 pub fn display_author(author: AuthorID) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
-        .seed(author as u32 + 4)
+        .seed(lsb_32(author))
         .to_rgb_array();
     format!(" {} ", author_to_hex(author))
         .black()
