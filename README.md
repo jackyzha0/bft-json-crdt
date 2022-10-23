@@ -1,6 +1,6 @@
 # Byzantine Fault Tolerant CRDTs
 
-This work is mainly inspired by implementing Martin Kleppmann's 2022 paper on *Making CRDTs Byzantine Fault Tolerant* ([source](https://martin.kleppmann.com/papers/bft-crdt-papoc22.pdf))
+This work is mainly inspired by implementing Martin Kleppmann's 2022 paper on *Making CRDTs Byzantine Fault Tolerant*[^2] 
 on top of a simplified [Automerge](https://automerge.org/) implementation.
 
 The goal is to show a working prototype that demonstrated in simple code the ideas behind
@@ -40,6 +40,10 @@ This is mostly a learning/instructional project but there are a few places where
   2. e.g. skipping the second `find` operation in `integrate` if sequence number is already larger
 3. Improve storage requirement. As of now, a single `Op` weighs in at *over* 168 bytes. This doesn't even fit in a single cache line!
 4. Speed up Ed25519 signature verification time by batching.
+5. Currently, each character is a single op. Similar to Yjs, we can combine runs of characters into larger entities like what André, Luc, et al.[^1] suggest
+
+[^1]: André, Luc, et al. "Supporting adaptable granularity of changes for massive-scale collaborative editing." 9th IEEE International Conference on Collaborative Computing: Networking, Applications and Worksharing. IEEE, 2013. 
+[^2]: Kleppmann, Martin. "Making CRDTs Byzantine Fault Tolerant." Proceedings of the 9th Workshop on Principles and Practice of Consistency for Distributed Data. 2022.
 
 ## Acknowledgements
 Thank you to [Nalin Bhardwaj](https://nibnalin.me/) for helping me with my cryptography questions and [Martin Kleppmann](https://martin.kleppmann.com/)

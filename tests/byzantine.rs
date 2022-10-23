@@ -15,7 +15,7 @@ use bft_json_crdt::{
 // 4. overwhelm message queue by sending many updates far into the future
 //      also untestested! currently i keep an unbounded message queue
 
-// case 2a + 2c
+// case 2a + 2b
 #[test]
 fn test_equivocation() {
     let mut list = ListCRDT::<char>::new();
