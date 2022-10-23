@@ -29,8 +29,6 @@ where
     pub author: AuthorID, // pub key of author
     pub seq: SequenceNumber,
     pub content: Option<T>,
-
-    // Metadata
     pub is_deleted: bool,
 
     // Fields that are used to detect faults/tampering

@@ -39,3 +39,8 @@ This is mostly a learning/instructional project but there are a few places where
   1. A few Automerge optimizations that were not implemented
   2. e.g. skipping the second `find` operation in `integrate` if sequence number is already larger
 3. Improve storage requirement. As of now, a single `Op` weighs in at *over* 168 bytes. This doesn't even fit in a single cache line!
+4. Speed up Ed25519 signature verification time by batching.
+
+## Acknowledgements
+Thank you to [Nalin Bhardwaj](https://nibnalin.me/) for helping me with my cryptography questions and [Martin Kleppmann](https://martin.kleppmann.com/)
+for his teaching materials and lectures which taught me a significant portion of what I've learned about distributed systems and CRDTs.
