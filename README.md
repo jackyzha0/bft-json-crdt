@@ -20,9 +20,10 @@ Numbers are compared to  which report their performance benchmarks [here](https:
 
 | # Ops | Raw String (JS) | Ours (basic) | Ours (BFT) | Automerge |
 |--|--|--|--|--|
-|10k       | n/a     | 0.081s  | n/a | 1.6s        |
-|100k      | n/a     | 9.321s | n/a | 43.0s       |
-|All (259k)| 0.61s | 88.610s  | n/a | Timeout/OOM |
+|10k       | n/a     | 0.081s   | 1.793s   | 1.6s         |
+|100k      | n/a     | 9.321s   | 38.842s  | 43.0s        |
+|All (259k)| 0.61s   | 88.610s  | 334.960s | Out of Memory|
+|Memory    | 0.1MB   | n/a      | 69.5MB   | 880MB        |
 
 ## Flamegraph
 To get some flamegraphs of the time graph on MacOS, run:
@@ -37,3 +38,4 @@ This is mostly a learning/instructional project but there are a few places where
 2. Avoid calling `find` so many times 
   1. A few Automerge optimizations that were not implemented
   2. e.g. skipping the second `find` operation in `integrate` if sequence number is already larger
+3. Improve storage requirement. As of now, a single `Op` weighs in at *over* 168 bytes. This doesn't even fit in a single cache line!

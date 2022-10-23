@@ -30,7 +30,7 @@ fn bench_insert_1_000_linear(b: &mut Bencher) {
 #[bench]
 fn bench_insert_many_agents_conflicts(b: &mut Bencher) {
     b.iter(|| {
-        const N: usize = 100;
+        const N: usize = 25;
         let mut rng = rand::thread_rng();
         let mut crdts: Vec<ListCRDT<usize>> = Vec::with_capacity(N);
         let mut logs: Vec<Op<usize>> = Vec::new();

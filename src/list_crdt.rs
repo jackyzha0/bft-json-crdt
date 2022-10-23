@@ -1,6 +1,9 @@
 use ed25519_dalek::Keypair;
 
-use crate::{op::*, keypair::{AuthorID, make_keypair}};
+use crate::{
+    keypair::{make_keypair, AuthorID},
+    op::*,
+};
 use std::{
     cmp::{max, Ordering},
     collections::HashMap,
@@ -15,7 +18,7 @@ where
     pub(crate) ops: Vec<Op<T>>,
 
     /// Public key for this node
-    pub our_id: AuthorID, 
+    pub our_id: AuthorID,
 
     // Ed25519 Keypair
     keypair: Keypair,
@@ -64,16 +67,14 @@ where
 
     /// Locally insert some content causally after the given operation
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
-        let op = Op::new(after, self.our_id, self.our_seq() + 1, false, content);
+        let op = Op::new(after, self.our_id, self.our_seq() + 1, false, Some(content), &self.keypair);
         self.apply(op.clone());
         op
     }
 
     /// Mark a node as deleted. Will panic if the node doesn't exist
     pub fn delete(&mut self, id: OpID) -> Op<T> {
-        let idx = self.find(id).unwrap();
-        let mut op = self.ops[idx].clone();
-        op.is_deleted = true;
+        let op = Op::new(id, self.our_id, self.our_seq() + 1, true, None, &self.keypair);
         self.apply(op.clone());
         op
     }
@@ -92,7 +93,7 @@ where
         let origin_id = self.find(op.origin);
 
         // reject invalid hashes
-        if !op.valid_hash() {
+        if !op.is_valid() {
             return;
         }
 
@@ -139,6 +140,13 @@ where
         // get index of the new op's origin
         let new_op_parent_idx = self.find(new_op.origin).unwrap();
 
+        // if its a delete operation, we don't need to do much
+        if new_op.is_deleted {
+            let mut op = &mut self.ops[new_op_parent_idx];
+            op.is_deleted = true;
+            return;
+        }
+
         // start looking from right after parent
         // stop when we reach end of document
         let mut i = new_op_parent_idx + 1;
@@ -146,11 +154,8 @@ where
             let op = &self.ops[i];
             let op_parent_idx = self.find(op.origin).unwrap();
 
-            // if we are the same node, only thing that could have changed is if this node was
-            // marked as deleted
+            // idempotency 
             if op.id == new_op.id {
-                // remove-wins (RW) strategy
-                self.ops[i].is_deleted = op.is_deleted || new_op.is_deleted;
                 return;
             }
 
