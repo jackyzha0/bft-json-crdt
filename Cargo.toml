@@ -3,6 +3,9 @@ name = "bft-json-crdt"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+logging = []
+
 [dependencies]
 colored = "2.0.0"
 ed25519-dalek = "1.0.1"

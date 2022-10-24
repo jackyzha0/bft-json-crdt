@@ -1,19 +1,25 @@
-use std::{collections::HashMap, fmt::Display};
-
+use std::fmt::Display;
 use crate::{
     list_crdt::ListCRDT,
-    op::{Op, OpID, ROOT_ID}, keypair::{AuthorID, lsb_32},
+    op::{Op, OpID},
 };
-use colored::Colorize;
-use random_color::{Luminosity, RandomColor};
 
-const ENABLE_LOGGING: bool = false;
+#[cfg(logging)]
+use {
+    colored::Colorize,
+    random_color::{Luminosity, RandomColor},
+    keypair::{lsb_32, AuthorID},
+    std::collections::HashMap,
+    crate::op::ROOT_ID,
+};
 
+#[cfg(logging)]
 fn author_to_hex(author: AuthorID) -> String {
     format!("{:#x}", lsb_32(author)).to_string()
 }
 
-pub fn display_op_id<T: Clone>(op: &Op<T>) -> String {
+#[cfg(logging)]
+fn display_op_id<T: Clone>(op: &Op<T>) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
         .seed(lsb_32(op.author))
@@ -25,7 +31,8 @@ pub fn display_op_id<T: Clone>(op: &Op<T>) -> String {
     )
 }
 
-pub fn display_author(author: AuthorID) -> String {
+#[cfg(logging)]
+fn display_author(author: AuthorID) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
         .seed(lsb_32(author))
@@ -40,11 +47,13 @@ impl<T> ListCRDT<T>
 where
     T: Display + Clone + Eq,
 {
-    pub fn log_ops(&self, highlight: Option<OpID>) {
-        if !ENABLE_LOGGING {
-            return;
-        }
+    #[cfg(not(logging))]
+    pub fn log_ops(&self, _: Option<OpID>) {
+        return;
+    }
 
+    #[cfg(logging)]
+    pub fn log_ops(&self, highlight: Option<OpID>) {
         let mut lines = Vec::<String>::new();
 
         // do in-order traversal
@@ -145,11 +154,13 @@ where
         println!("{}", lines.join("\n"));
     }
 
-    pub fn log_apply(&self, op: &Op<T>) {
-        if !ENABLE_LOGGING {
-            return;
-        }
+    #[cfg(not(logging))]
+    pub fn log_apply(&self, _: &Op<T>) {
+        return;
+    }
 
+    #[cfg(logging)]
+    pub fn log_apply(&self, op: &Op<T>) {
         if op.is_deleted {
             println!(
                 "{} Performing a delete of {}@{}",

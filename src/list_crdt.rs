@@ -87,15 +87,15 @@ where
     /// Apply an operation (both local and remote) to this local list CRDT.
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
     pub fn apply(&mut self, op: Op<T>) {
-        let op_id = op.id;
-        let author = op.author();
-        let seq = op.sequence_num();
-        let origin_id = self.find(op.origin);
-
         // reject invalid hashes
         if !op.is_valid() {
             return;
         }
+
+        let op_id = op.id;
+        let author = op.author();
+        let seq = op.sequence_num();
+        let origin_id = self.find(op.origin);
 
         // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin_id.is_none() {

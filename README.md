@@ -18,12 +18,12 @@ Altough this implementation does not optimize for performance, it still nonethel
 Benchmarking happened on a 2019 Macbook Pro with a 2.6GHz i7.
 Numbers are compared to Automerge which report their performance benchmarks [here](https://github.com/automerge/automerge-perf)
 
-| # Ops | Raw String (JS) | Ours (basic) | Ours (BFT) | Automerge |
-|--|--|--|--|--|
-|10k       | n/a     | 0.081s   | 1.793s   | 1.6s         |
-|100k      | n/a     | 9.321s   | 38.842s  | 43.0s        |
-|All (259k)| 0.61s   | 88.610s  | 334.960s | Out of Memory|
-|Memory    | 0.1MB   | 27.6MB   | 59.5MB   | 880MB        |
+| # Ops | Raw String (JS) | Ours (basic) | Ours (BFT) | Automerge (JS) | Automerge (Rust) |
+|--|--|--|--|--|--|
+|10k       | n/a     | 0.081s   | 1.793s   | 1.6s         | 0.047s  |
+|100k      | n/a     | 9.321s   | 38.842s  | 43.0s        | 0.597s  |
+|All (259k)| 0.61s   | 88.610s  | 334.960s | Out of Memory| 1.780s  |
+|Memory    | 0.1MB   | 27.6MB   | 59.5MB   | 880MB        | 232.5MB |
 
 ## Flamegraph
 To get some flamegraphs of the time graph on MacOS, run:
@@ -39,7 +39,7 @@ This is mostly a learning/instructional project but there are a few places where
   1. A few Automerge optimizations that were not implemented
   2. e.g. skipping the second `find` operation in `integrate` if sequence number is already larger
 3. Improve storage requirement. As of now, a single `Op` weighs in at *over* 168 bytes. This doesn't even fit in a single cache line!
-4. Speed up Ed25519 signature verification time by batching.
+4. Speed up Ed25519 signature verification time by batching. For example, a peer might create an atomic 'transaction' that contains a bunch of changes. 
 5. Currently, each character is a single op. Similar to Yjs, we can combine runs of characters into larger entities like what André, Luc, et al.[^1] suggest
 
 [^1]: André, Luc, et al. "Supporting adaptable granularity of changes for massive-scale collaborative editing." 9th IEEE International Conference on Collaborative Computing: Networking, Applications and Worksharing. IEEE, 2013. 
