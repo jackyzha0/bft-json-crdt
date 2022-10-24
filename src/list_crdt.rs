@@ -88,6 +88,7 @@ where
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
     pub fn apply(&mut self, op: Op<T>) {
         // reject invalid hashes
+        #[cfg(feature = "bft")]
         if !op.is_valid() {
             return;
         }
