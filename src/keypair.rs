@@ -1,9 +1,9 @@
-use ed25519_dalek::{Keypair, PublicKey, Signature, Signer, Verifier, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
+use fastcrypto::{ed25519::{ED25519_SIGNATURE_LENGTH, ED25519_PUBLIC_KEY_LENGTH, Ed25519KeyPair, Ed25519PublicKey, Ed25519Signature}, traits::{KeyPair, Signer}, Verifier};
 use rand::rngs::OsRng;
 
 /// Represents the ID of a unique node
-pub type AuthorID = [u8; PUBLIC_KEY_LENGTH];
-pub type SignedDigest = [u8; SIGNATURE_LENGTH];
+pub type AuthorID = [u8; ED25519_PUBLIC_KEY_LENGTH];
+pub type SignedDigest = [u8; ED25519_SIGNATURE_LENGTH];
 
 pub fn lsb_32(pubkey: AuthorID) -> u32 {
     ((pubkey[0] as u32) << 24)
@@ -12,15 +12,15 @@ pub fn lsb_32(pubkey: AuthorID) -> u32 {
         + ((pubkey[3] as u32) << 0)
 }
 
-pub fn make_keypair() -> Keypair {
+pub fn make_keypair() -> Ed25519KeyPair {
     let mut csprng = OsRng {};
-    Keypair::generate(&mut csprng)
+    Ed25519KeyPair::generate(&mut csprng)
 }
 
-pub fn sign(keypair: &Keypair, message: &[u8]) -> Signature {
+pub fn sign(keypair: &Ed25519KeyPair, message: &[u8]) -> Ed25519Signature {
     keypair.sign(message)
 }
 
-pub fn verify(pubkey: PublicKey, message: &[u8], signature: Signature) -> bool {
+pub fn verify(pubkey: Ed25519PublicKey, message: &[u8], signature: Ed25519Signature) -> bool {
     pubkey.verify(message, &signature).is_ok()
 }

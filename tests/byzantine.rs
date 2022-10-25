@@ -65,7 +65,7 @@ fn test_forge_update() {
     // this is a completely valid hash and digest, just signed by the wrong person
     // as keypair.public != list.public
     op.id = op.hash(); // we can't tell from op.hash() alone whether this op is valid or not
-    op.signed_digest = sign(&keypair, &op.id).to_bytes();
+    op.signed_digest = sign(&keypair, &op.id).sig.to_bytes();
 
     list.apply(op);
 

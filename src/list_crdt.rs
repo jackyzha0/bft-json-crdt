@@ -1,4 +1,4 @@
-use ed25519_dalek::Keypair;
+use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 
 use crate::{
     keypair::{make_keypair, AuthorID},
@@ -19,9 +19,7 @@ where
 
     /// Public key for this node
     pub our_id: AuthorID,
-
-    // Ed25519 Keypair
-    keypair: Keypair,
+    keypair: Ed25519KeyPair,
 
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
@@ -43,7 +41,7 @@ where
     pub fn new() -> ListCRDT<T> {
         // seed rng and generate keypair
         let keypair = make_keypair();
-        let id = keypair.public.to_bytes();
+        let id = keypair.public().0.to_bytes();
 
         // initialize other fields
         let mut ops = Vec::new();

@@ -1,7 +1,8 @@
-use ed25519_dalek::Keypair;
-use ed25519_dalek::PublicKey;
-use ed25519_dalek::Signature;
-use ed25519_dalek::Verifier;
+use fastcrypto::Verifier;
+use fastcrypto::ed25519::Ed25519KeyPair;
+use fastcrypto::ed25519::Ed25519PublicKey;
+use fastcrypto::ed25519::Ed25519Signature;
+use fastcrypto::traits::ToFromBytes;
 use sha2::Digest;
 use sha2::Sha256;
 use std::fmt::Display;
@@ -57,7 +58,7 @@ where
         seq: SequenceNumber,
         is_deleted: bool,
         content: Option<T>,
-        keypair: &Keypair,
+        keypair: &Ed25519KeyPair,
     ) -> Op<T> {
         let mut op = Self {
             origin,
@@ -69,7 +70,7 @@ where
             content,
         };
         op.id = op.hash();
-        op.signed_digest = sign(keypair, &op.id).to_bytes();
+        op.signed_digest = sign(keypair, &op.id).sig.to_bytes();
         op
     }
 
@@ -101,8 +102,8 @@ where
         }
 
         // see if digest was actually signed by the author it claims to be signed by
-        let digest = Signature::from_bytes(&self.signed_digest);
-        let pubkey = PublicKey::from_bytes(&self.author);
+        let digest = Ed25519Signature::from_bytes(&self.signed_digest);
+        let pubkey = Ed25519PublicKey::from_bytes(&self.author);
         match (digest, pubkey) {
             (Ok(digest), Ok(pubkey)) => pubkey.verify(&self.id, &digest).is_ok(),
             (_, _) => false,
