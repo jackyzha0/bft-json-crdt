@@ -111,10 +111,8 @@ where
         self.log_apply(&op);
         self.integrate(op);
 
-        // update sequence number for sender
+        // update sequence number for sender and for ourselves
         self.logical_clocks.insert(author, seq);
-
-        // update our id
         self.highest_seq = max(self.highest_seq, seq);
         self.logical_clocks.insert(self.our_id, self.highest_seq);
 

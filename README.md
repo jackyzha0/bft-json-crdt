@@ -33,11 +33,15 @@ sudo cargo flamegraph --dev --root --bench speed
 ```
 
 ## Further Work 
-This is mostly a learning/instructional project but there are a few places where performance improvements are obvious
-1. This is backed by `std::Vec` which isn't great for random insert. Replace with a `collections::BTreeSet` or something that provides better insert performance.
-2. Avoid calling `find` so many times 
-  1. A few Automerge optimizations that were not implemented
-  2. e.g. skipping the second `find` operation in `integrate` if sequence number is already larger
+This is mostly a learning/instructional project but there are a few places where performance improvements are obvious:
+
+1. This is backed by `std::Vec` which isn't great for random insert. Replace with a B-tree or something that provides better insert and find performance
+  1. [Diamond Types](https://github.com/josephg/diamond-types) and [Automerge (Rust)](https://github.com/automerge/automerge-rs) use a B-tree
+  2. Yjs is backed by a doubly linked-list and caches last ~5-10 accessed locations (assumes that most edits happen sequentially; seeks are rare)
+  3. (funnily enough, main peformance hit is dominated by find and not insert, see [this flamegraph](./flamegraphs/flamegraph_unoptimized.svg))
+2. Avoid calling `find` so many times. A few Automerge optimizations that were not implemented
+  1. Use an index hint (especially for local inserts)
+  2. Skipping the second `find` operation in `integrate` if sequence number is already larger
 3. Improve storage requirement. As of now, a single `Op` weighs in at *over* 168 bytes. This doesn't even fit in a single cache line!
 4. Speed up Ed25519 signature verification time by batching. For example, a peer might create an atomic 'transaction' that contains a bunch of changes. 
 5. Currently, each character is a single op. Similar to Yjs, we can combine runs of characters into larger entities like what André, Luc, et al.[^1] suggest
