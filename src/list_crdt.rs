@@ -1,16 +1,13 @@
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 
-use crate::{
-    keypair::{make_keypair, AuthorID},
-    op::*,
-};
+use crate::{keypair::AuthorID, op::*};
 use std::{
     cmp::{max, Ordering},
     collections::HashMap,
     fmt::Display,
 };
 
-pub struct ListCRDT<T>
+pub struct ListCRDT<'a, T>
 where
     T: Clone + Display,
 {
@@ -19,7 +16,7 @@ where
 
     /// Public key for this node
     pub our_id: AuthorID,
-    keypair: Ed25519KeyPair,
+    keypair: &'a Ed25519KeyPair,
 
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
@@ -32,25 +29,22 @@ where
     highest_seq: SequenceNumber,
 }
 
-impl<T> ListCRDT<T>
+impl<T> ListCRDT<'_, T>
 where
     T: Eq + Display + Clone,
 {
     /// Create a new List CRDT with the given AuthorID.
     /// AuthorID should be unique.
-    pub fn new() -> ListCRDT<T> {
-        // seed rng and generate keypair
-        let keypair = make_keypair();
-        let id = keypair.public().0.to_bytes();
-
+    pub fn new(keypair: &Ed25519KeyPair) -> ListCRDT<T> {
         // initialize other fields
+        let id = keypair.public().0.to_bytes();
         let mut ops = Vec::new();
         ops.push(Op::make_root());
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
-            keypair,
+            keypair: &keypair,
             ops,
             message_q: HashMap::new(),
             logical_clocks,
@@ -65,14 +59,28 @@ where
 
     /// Locally insert some content causally after the given operation
     pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
-        let op = Op::new(after, self.our_id, self.our_seq() + 1, false, Some(content), &self.keypair);
+        let op = Op::new(
+            after,
+            self.our_id,
+            self.our_seq() + 1,
+            false,
+            Some(content),
+            &self.keypair,
+        );
         self.apply(op.clone());
         op
     }
 
     /// Mark a node as deleted. Will panic if the node doesn't exist
     pub fn delete(&mut self, id: OpID) -> Op<T> {
-        let op = Op::new(id, self.our_id, self.our_seq() + 1, true, None, &self.keypair);
+        let op = Op::new(
+            id,
+            self.our_id,
+            self.our_seq() + 1,
+            true,
+            None,
+            &self.keypair,
+        );
         self.apply(op.clone());
         op
     }
@@ -151,7 +159,7 @@ where
             let op = &self.ops[i];
             let op_parent_idx = self.find(op.origin).unwrap();
 
-            // idempotency 
+            // idempotency
             if op.id == new_op.id {
                 return;
             }
@@ -199,11 +207,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{list_crdt::ListCRDT, op::ROOT_ID};
+    use crate::{list_crdt::ListCRDT, op::ROOT_ID, keypair::make_keypair};
 
     #[test]
     fn test_simple() {
-        let mut list = ListCRDT::new();
+        let key1 = make_keypair();
+        let mut list = ListCRDT::new(&key1);
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
@@ -213,7 +222,8 @@ mod test {
 
     #[test]
     fn test_idempotence() {
-        let mut list = ListCRDT::new();
+        let key1 = make_keypair();
+        let mut list = ListCRDT::new(&key1);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
             list.apply(op);
@@ -223,7 +233,8 @@ mod test {
 
     #[test]
     fn test_delete() {
-        let mut list = ListCRDT::new();
+        let key1 = make_keypair();
+        let mut list = ListCRDT::new(&key1);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -234,7 +245,8 @@ mod test {
 
     #[test]
     fn test_interweave_chars() {
-        let mut list = ListCRDT::new();
+        let key1 = make_keypair();
+        let mut list = ListCRDT::new(&key1);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -243,8 +255,10 @@ mod test {
 
     #[test]
     fn test_conflicting_agents() {
-        let mut list1 = ListCRDT::new();
-        let mut list2 = ListCRDT::new();
+        let key1 = make_keypair();
+        let key2 = make_keypair();
+        let mut list1 = ListCRDT::new(&key1);
+        let mut list2 = ListCRDT::new(&key2);
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -265,8 +279,10 @@ mod test {
 
     #[test]
     fn test_delete_multiple_agent() {
-        let mut list1 = ListCRDT::new();
-        let mut list2 = ListCRDT::new();
+        let key1 = make_keypair();
+        let key2 = make_keypair();
+        let mut list1 = ListCRDT::new(&key1);
+        let mut list2 = ListCRDT::new(&key2);
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -280,7 +296,8 @@ mod test {
 
     #[test]
     fn test_nested() {
-        let mut list1 = ListCRDT::new();
+        let key1 = make_keypair();
+        let mut list1 = ListCRDT::new(&key1);
         let _c = list1.insert(ROOT_ID, 'c');
         let _a = list1.insert(ROOT_ID, 'a');
         let _d = list1.insert(_c.id, 'd');

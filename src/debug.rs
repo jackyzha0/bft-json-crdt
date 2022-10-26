@@ -43,7 +43,7 @@ fn display_author(author: AuthorID) -> String {
         .to_string()
 }
 
-impl<T> ListCRDT<T>
+impl<T> ListCRDT<'_, T>
 where
     T: Display + Clone + Eq,
 {

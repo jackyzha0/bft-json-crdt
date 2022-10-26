@@ -14,11 +14,13 @@ use bft_json_crdt::{
 //      this we don't test as we assume transport layer only allows valid messages
 // 4. overwhelm message queue by sending many updates far into the future
 //      also untestested! currently i keep an unbounded message queue
+// 5. block actual messages from honest actors (eclipse attack)
 
 // case 2a + 2b
 #[test]
 fn test_equivocation() {
-    let mut list = ListCRDT::<char>::new();
+    let key = make_keypair();
+    let mut list = ListCRDT::<char>::new(&key);
     let _a = list.insert(ROOT_ID, 'a');
     let _b = list.insert(_a.id, 'b');
 
@@ -48,7 +50,8 @@ fn test_equivocation() {
 fn test_forge_update() {
     // this implicity generates its own keypair
     // its public key is stored as list.our_id
-    let mut list = ListCRDT::<char>::new();
+    let key = make_keypair();
+    let mut list = ListCRDT::<char>::new(&key);
     let _a = list.insert(ROOT_ID, 'a');
 
     let keypair = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id

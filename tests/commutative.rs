@@ -1,6 +1,6 @@
 use bft_json_crdt::{
     list_crdt::ListCRDT,
-    op::{Op, OpID, ROOT_ID},
+    op::{Op, OpID, ROOT_ID}, keypair::make_keypair,
 };
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
@@ -14,9 +14,12 @@ fn test_fuzz_commutative_property() {
     let mut op_log = Vec::<Op<char>>::new();
     let mut op_log1 = Vec::<Op<char>>::new();
     let mut op_log2 = Vec::<Op<char>>::new();
-    let mut l1 = ListCRDT::<char>::new();
-    let mut l2 = ListCRDT::<char>::new();
-    let mut chk = ListCRDT::<char>::new();
+    let key1 = make_keypair();
+    let key2 = make_keypair();
+    let keychk = make_keypair();
+    let mut l1 = ListCRDT::<char>::new(&key1);
+    let mut l2 = ListCRDT::<char>::new(&key2);
+    let mut chk = ListCRDT::<char>::new(&keychk);
     for _ in 0..50 {
         let letter1: char = rng.gen_range(b'a'..b'z') as char;
         let letter2: char = rng.gen_range(b'a'..b'z') as char;

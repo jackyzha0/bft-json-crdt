@@ -46,7 +46,7 @@ fn bench_insert_many_agents_conflicts(b: &mut Bencher) {
         for op in logs {
             for c in &mut crdts {
                 if op.author() != c.our_id {
-                    c.apply(op)
+                    c.apply(op);
                 }
             }
         }
