@@ -6,6 +6,7 @@ pub struct Document {
     keypair: Ed25519KeyPair,
 }
 
+
 impl Document {
     pub fn new() -> Document {
         // seed rng and generate keypair

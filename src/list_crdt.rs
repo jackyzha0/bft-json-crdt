@@ -35,7 +35,7 @@ where
 {
     /// Create a new List CRDT with the given AuthorID.
     /// AuthorID should be unique.
-    pub fn new(keypair: &Ed25519KeyPair) -> ListCRDT<T> {
+    pub fn new(keypair: &Ed25519KeyPair) -> ListCRDT<'_, T> {
         // initialize other fields
         let id = keypair.public().0.to_bytes();
         let mut ops = Vec::new();
