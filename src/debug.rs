@@ -1,16 +1,16 @@
-use std::fmt::Display;
 use crate::{
     list_crdt::ListCRDT,
     op::{Op, OpID},
 };
+use std::fmt::Display;
 
 #[cfg(logging)]
 use {
-    colored::Colorize,
-    random_color::{Luminosity, RandomColor},
-    keypair::{lsb_32, AuthorID},
-    std::collections::HashMap,
     crate::op::ROOT_ID,
+    colored::Colorize,
+    keypair::{lsb_32, AuthorID},
+    random_color::{Luminosity, RandomColor},
+    std::collections::HashMap,
 };
 
 #[cfg(logging)]
@@ -48,9 +48,7 @@ where
     T: Display + Clone + Eq,
 {
     #[cfg(not(logging))]
-    pub fn log_ops(&self, _: Option<OpID>) {
-        return;
-    }
+    pub fn log_ops(&self, _: Option<OpID>) {}
 
     #[cfg(logging)]
     pub fn log_ops(&self, highlight: Option<OpID>) {
@@ -155,9 +153,7 @@ where
     }
 
     #[cfg(not(logging))]
-    pub fn log_apply(&self, _: &Op<T>) {
-        return;
-    }
+    pub fn log_apply(&self, _: &Op<T>) {}
 
     #[cfg(logging)]
     pub fn log_apply(&self, op: &Op<T>) {

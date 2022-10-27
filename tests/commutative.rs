@@ -21,8 +21,8 @@ fn test_fuzz_commutative_property() {
     let mut l2 = ListCRDT::<char>::new(&key2);
     let mut chk = ListCRDT::<char>::new(&keychk);
     for _ in 0..50 {
-        let letter1: char = rng.gen_range(b'a'..b'z') as char;
-        let letter2: char = rng.gen_range(b'a'..b'z') as char;
+        let letter1: char = rng.gen_range(b'a'..=b'z') as char;
+        let letter2: char = rng.gen_range(b'a'..=b'z') as char;
         let op1 = l1.insert(random_op(&op_log1, &mut rng), letter1);
         let op2 = l2.insert(random_op(&op_log2, &mut rng), letter2);
         op_log1.push(op1);
@@ -57,8 +57,8 @@ fn test_fuzz_commutative_property() {
     let mut op_log1 = Vec::<Op<char>>::new();
     let mut op_log2 = Vec::<Op<char>>::new();
     for _ in 0..50 {
-        let letter1: char = rng.gen_range(b'a'..b'z') as char;
-        let letter2: char = rng.gen_range(b'a'..b'z') as char;
+        let letter1: char = rng.gen_range(b'a'..=b'z') as char;
+        let letter2: char = rng.gen_range(b'a'..=b'z') as char;
         let op1 = l1.insert(random_op(&op_log, &mut rng), letter1);
         let op2 = l2.insert(random_op(&op_log, &mut rng), letter2);
         op_log1.push(op1);

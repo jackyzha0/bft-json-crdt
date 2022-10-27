@@ -44,8 +44,7 @@ fn test_editing_trace() {
     ops.push(ROOT_ID);
     let start = PreciseTime::now();
     let edits = t.edits;
-    let mut i = 0;
-    for op in edits {
+    for (i, op) in edits.into_iter().enumerate() {
         let origin = ops[op.pos];
         if op.delete {
             let delete_op = list.delete(origin);
@@ -63,7 +62,6 @@ fn test_editing_trace() {
             }
             _ => {}
         };
-        i += 1;
     }
 
     let end = PreciseTime::now();
@@ -73,5 +71,5 @@ fn test_editing_trace() {
     let expected = t.final_text;
     assert_eq!(result.len(), expected.len());
     assert_eq!(result, expected);
-    assert!(false);
+    // assert!(false);
 }

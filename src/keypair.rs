@@ -9,7 +9,7 @@ pub fn lsb_32(pubkey: AuthorID) -> u32 {
     ((pubkey[0] as u32) << 24)
         + ((pubkey[1] as u32) << 16)
         + ((pubkey[2] as u32) << 8)
-        + ((pubkey[3] as u32) << 0)
+        + (pubkey[3] as u32)
 }
 
 pub fn make_keypair() -> Ed25519KeyPair {

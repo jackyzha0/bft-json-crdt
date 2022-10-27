@@ -1,7 +1,6 @@
-use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
-use std::cmp::max;
-
 use crate::op::{Op, SequenceNumber};
+use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
+use std::cmp::{max, Ordering};
 use std::{collections::HashMap, fmt::Display};
 
 use crate::keypair::AuthorID;
@@ -27,7 +26,7 @@ where
         logical_clocks.insert(id, 0);
         LWWRegisterCRDT {
             our_id: id,
-            keypair: &keypair,
+            keypair,
             value: Op::make_root(),
             logical_clocks,
             highest_seq: 0,
@@ -45,7 +44,7 @@ where
             self.our_seq() + 1,
             false,
             Some(val),
-            &self.keypair,
+            self.keypair,
         );
         self.apply(op.clone());
         op
@@ -60,10 +59,17 @@ where
         let author = op.author();
         let seq = op.sequence_num();
 
-        // take most recent update
-        if seq >= self.our_seq() {
-            self.value = op;
-        }
+        // take most recent update by sequence number
+        match seq.cmp(&self.our_seq()) {
+            Ordering::Greater => self.value = op,
+            Ordering::Equal => {
+                // if we are equal, tie break on author
+                if op.author() < self.our_id {
+                    self.value = op
+                }
+            }
+            Ordering::Less => {} // LWW, ignore if its outdate
+        };
 
         // update bookkeeping
         self.logical_clocks.insert(author, seq);
@@ -78,8 +84,8 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::keypair::make_keypair;
     use super::LWWRegisterCRDT;
+    use crate::keypair::make_keypair;
 
     #[test]
     fn test_single_lww() {
@@ -91,7 +97,7 @@ mod test {
         register.set(99);
         assert_eq!(register.view(), Some(&99));
     }
-    
+
     #[test]
     fn test_multiple_writer() {
         let key1 = make_keypair();
@@ -107,5 +113,22 @@ mod test {
         register2.apply(_a);
         assert_eq!(register1.view(), Some(&'b'));
         assert_eq!(register2.view(), Some(&'b'));
+    }
+
+    #[test]
+    fn test_consistent_tiebreak() {
+        let key1 = make_keypair();
+        let key2 = make_keypair();
+        let mut register1 = LWWRegisterCRDT::new(&key1);
+        let mut register2 = LWWRegisterCRDT::new(&key2);
+        let _a = register1.set('a');
+        let _b = register2.set('b');
+        register1.apply(_b);
+        register2.apply(_a);
+        let _c = register1.set('c');
+        let _d = register2.set('d');
+        register2.apply(_c);
+        register1.apply(_d);
+        assert_eq!(register1.view(), register2.view());
     }
 }

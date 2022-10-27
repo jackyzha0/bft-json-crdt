@@ -38,13 +38,12 @@ where
     pub fn new(keypair: &Ed25519KeyPair) -> ListCRDT<'_, T> {
         // initialize other fields
         let id = keypair.public().0.to_bytes();
-        let mut ops = Vec::new();
-        ops.push(Op::make_root());
+        let ops = vec![Op::make_root()];
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
-            keypair: &keypair,
+            keypair,
             ops,
             message_q: HashMap::new(),
             logical_clocks,
@@ -65,7 +64,7 @@ where
             self.our_seq() + 1,
             false,
             Some(content),
-            &self.keypair,
+            self.keypair,
         );
         self.apply(op.clone());
         op
@@ -79,7 +78,7 @@ where
             self.our_seq() + 1,
             true,
             None,
-            &self.keypair,
+            self.keypair,
         );
         self.apply(op.clone());
         op
@@ -108,7 +107,7 @@ where
         if origin_id.is_none() {
             self.message_q
                 .entry(op.origin)
-                .or_insert(Vec::new())
+                .or_default()
                 .push(op);
             return;
         }
