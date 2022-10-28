@@ -88,7 +88,7 @@ mod test {
     use crate::keypair::make_keypair;
 
     #[test]
-    fn test_single_lww() {
+    fn test_lww_simple() {
         let key = make_keypair();
         let mut register = LWWRegisterCRDT::new(&key);
         assert_eq!(register.view(), None);
@@ -99,7 +99,7 @@ mod test {
     }
 
     #[test]
-    fn test_multiple_writer() {
+    fn test_lww_multiple_writer() {
         let key1 = make_keypair();
         let key2 = make_keypair();
         let mut register1 = LWWRegisterCRDT::new(&key1);
@@ -116,7 +116,18 @@ mod test {
     }
 
     #[test]
-    fn test_consistent_tiebreak() {
+    fn test_lww_idempotence() {
+        let key = make_keypair();
+        let mut register = LWWRegisterCRDT::new(&key);
+        let op = register.set(1);
+        for _ in 1..10 {
+            register.apply(op);
+        }
+        assert_eq!(register.view(), Some(&1));
+    }
+
+    #[test]
+    fn test_lww_consistent_tiebreak() {
         let key1 = make_keypair();
         let key2 = make_keypair();
         let mut register1 = LWWRegisterCRDT::new(&key1);

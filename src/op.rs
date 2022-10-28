@@ -76,7 +76,7 @@ where
 
     pub fn hash(&self) -> OpID {
         let content_str = match self.content.as_ref() {
-            Some(content) => format!("{}", content),
+            Some(content) => format!("{content}"),
             None => "".to_string()
         };
         let fmt_str = format!(
@@ -96,6 +96,11 @@ where
     }
 
     pub fn is_valid(&self) -> bool {
+        // make sure content is only none for deletion events
+        if self.content.is_none() && !self.is_deleted {
+            return false;
+        }
+
         // try to avoid expensive sig check if early fail
         if self.hash() != self.id {
             return false;

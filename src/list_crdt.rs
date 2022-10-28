@@ -105,10 +105,7 @@ where
 
         // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin_id.is_none() {
-            self.message_q
-                .entry(op.origin)
-                .or_default()
-                .push(op);
+            self.message_q.entry(op.origin).or_default().push(op);
             return;
         }
 
@@ -206,10 +203,10 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{list_crdt::ListCRDT, op::ROOT_ID, keypair::make_keypair};
+    use crate::{keypair::make_keypair, list_crdt::ListCRDT, op::ROOT_ID};
 
     #[test]
-    fn test_simple() {
+    fn test_list_simple() {
         let key1 = make_keypair();
         let mut list = ListCRDT::new(&key1);
         let _one = list.insert(ROOT_ID, 1);
@@ -220,9 +217,9 @@ mod test {
     }
 
     #[test]
-    fn test_idempotence() {
-        let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1);
+    fn test_list_idempotence() {
+        let key = make_keypair();
+        let mut list = ListCRDT::new(&key);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
             list.apply(op);
@@ -231,7 +228,7 @@ mod test {
     }
 
     #[test]
-    fn test_delete() {
+    fn test_list_delete() {
         let key1 = make_keypair();
         let mut list = ListCRDT::new(&key1);
         let _one = list.insert(ROOT_ID, 'a');
@@ -243,7 +240,7 @@ mod test {
     }
 
     #[test]
-    fn test_interweave_chars() {
+    fn test_list_interweave_chars() {
         let key1 = make_keypair();
         let mut list = ListCRDT::new(&key1);
         let _one = list.insert(ROOT_ID, 'a');
@@ -253,7 +250,7 @@ mod test {
     }
 
     #[test]
-    fn test_conflicting_agents() {
+    fn test_list_conflicting_agents() {
         let key1 = make_keypair();
         let key2 = make_keypair();
         let mut list1 = ListCRDT::new(&key1);
@@ -277,7 +274,7 @@ mod test {
     }
 
     #[test]
-    fn test_delete_multiple_agent() {
+    fn test_list_delete_multiple_agent() {
         let key1 = make_keypair();
         let key2 = make_keypair();
         let mut list1 = ListCRDT::new(&key1);
@@ -294,7 +291,7 @@ mod test {
     }
 
     #[test]
-    fn test_nested() {
+    fn test_list_nested() {
         let key1 = make_keypair();
         let mut list1 = ListCRDT::new(&key1);
         let _c = list1.insert(ROOT_ID, 'c');

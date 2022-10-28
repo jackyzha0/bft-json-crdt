@@ -1,4 +1,11 @@
-use fastcrypto::{ed25519::{ED25519_SIGNATURE_LENGTH, ED25519_PUBLIC_KEY_LENGTH, Ed25519KeyPair, Ed25519PublicKey, Ed25519Signature}, traits::{KeyPair, Signer}, Verifier};
+use fastcrypto::{
+    ed25519::{
+        Ed25519KeyPair, Ed25519PublicKey, Ed25519Signature, ED25519_PUBLIC_KEY_LENGTH,
+        ED25519_SIGNATURE_LENGTH,
+    },
+    traits::{KeyPair, Signer},
+    Verifier,
+};
 use rand::rngs::OsRng;
 
 /// Represents the ID of a unique node

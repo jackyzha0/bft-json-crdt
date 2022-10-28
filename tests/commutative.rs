@@ -9,7 +9,7 @@ fn random_op<T: Clone>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
 }
 
 #[test]
-fn test_fuzz_commutative_property() {
+fn test_list_fuzz_commutative() {
     let mut rng = rand::thread_rng();
     let mut op_log = Vec::<Op<char>>::new();
     let mut op_log1 = Vec::<Op<char>>::new();
