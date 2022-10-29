@@ -171,7 +171,7 @@ where
                         Ordering::Equal => {
                             // conflict, resolve arbitrarily but deterministically
                             // tie-break on author id as that is unique
-                            if new_op.author() < op.author() {
+                            if new_op.author() > op.author() {
                                 break;
                             }
                         }

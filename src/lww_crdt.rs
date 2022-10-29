@@ -60,11 +60,11 @@ where
         let seq = op.sequence_num();
 
         // take most recent update by sequence number
-        match seq.cmp(&self.our_seq()) {
+        match seq.cmp(&self.value.sequence_num()) {
             Ordering::Greater => self.value = op,
             Ordering::Equal => {
                 // if we are equal, tie break on author
-                if op.author() < self.our_id {
+                if op.author() > self.value.author() {
                     self.value = op
                 }
             }

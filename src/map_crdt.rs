@@ -138,7 +138,9 @@ where
         // content is guaranteed to be non-None as per op.is_valid()
         let seq = new_op.sequence_num();
         let Register { key, value: _ } = new_op.content.as_ref().unwrap();
-        let old_seq = self.table.get(key).map(|op| op.sequence_num()).unwrap_or(0);
+        let old_op = self.table.get(key);
+        let old_seq = old_op.map(|op| op.sequence_num()).unwrap_or(0);
+        let old_author = old_op.map(|op| op.author()).unwrap_or_default();
 
         // insert new one
         match seq.cmp(&old_seq) {
@@ -147,7 +149,7 @@ where
             }
             Ordering::Equal => {
                 // if we are equal, tie break on author
-                if new_op.author() < self.our_id {
+                if new_op.author() > old_author {
                     self.table.insert(key.to_owned(), new_op);
                 }
             }
@@ -238,14 +240,7 @@ mod test {
 
         let m1view = map1.view();
         let m2view = map2.view();
-        let map1keys = sorted(m1view.keys());
-        let map2keys = sorted(m2view.keys());
-        let map1vals = sorted(m1view.values());
-        let map2vals = sorted(m2view.values());
-        assert_eq!(map1keys.len(), 4);
-        assert_eq!(map1keys.len(), map2keys.len());
-        assert_eq!(map1vals.len(), map2vals.len());
-        assert!(map1keys.eq(map2keys));
-        assert!(map1vals.eq(map2vals));
+        assert_eq!(sorted(m1view.keys()).len(), 4);
+        assert_eq!(m1view, m2view);
     }
 }
