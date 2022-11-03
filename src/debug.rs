@@ -4,21 +4,20 @@ use crate::{
 };
 use std::fmt::Display;
 
-#[cfg(logging)]
+#[cfg(feature = "logging")]
 use {
-    crate::op::ROOT_ID,
+    crate::{op::ROOT_ID, keypair::{lsb_32, AuthorID}},
     colored::Colorize,
-    keypair::{lsb_32, AuthorID},
     random_color::{Luminosity, RandomColor},
     std::collections::HashMap,
 };
 
-#[cfg(logging)]
+#[cfg(feature = "logging")]
 fn author_to_hex(author: AuthorID) -> String {
     format!("{:#x}", lsb_32(author)).to_string()
 }
 
-#[cfg(logging)]
+#[cfg(feature = "logging")]
 fn display_op_id<T: Clone>(op: &Op<T>) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
@@ -31,7 +30,7 @@ fn display_op_id<T: Clone>(op: &Op<T>) -> String {
     )
 }
 
-#[cfg(logging)]
+#[cfg(feature = "logging")]
 fn display_author(author: AuthorID) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
@@ -45,12 +44,12 @@ fn display_author(author: AuthorID) -> String {
 
 impl<T> ListCRDT<'_, T>
 where
-    T: Display + Clone + Eq,
+    T: Display + Clone,
 {
-    #[cfg(not(logging))]
+    #[cfg(not(feature = "logging"))]
     pub fn log_ops(&self, _: Option<OpID>) {}
 
-    #[cfg(logging)]
+    #[cfg(feature = "logging")]
     pub fn log_ops(&self, highlight: Option<OpID>) {
         let mut lines = Vec::<String>::new();
 
@@ -118,7 +117,7 @@ where
                     .as_ref()
                     .map_or("[empty]".to_string(), |c| c.to_string())
             };
-            if op.is_deleted {
+            if op.is_deleted && op.id != ROOT_ID {
                 lines.push(format!(
                     "{}{}{} {} {}",
                     prefixes,
@@ -152,10 +151,10 @@ where
         println!("{}", lines.join("\n"));
     }
 
-    #[cfg(not(logging))]
+    #[cfg(not(feature = "logging"))]
     pub fn log_apply(&self, _: &Op<T>) {}
 
-    #[cfg(logging)]
+    #[cfg(feature = "logging")]
     pub fn log_apply(&self, op: &Op<T>) {
         if op.is_deleted {
             println!(

@@ -1,16 +1,18 @@
-use crate::op::{Op, SequenceNumber};
+use crate::op::{Op, SequenceNumber, PathSegment};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 use std::cmp::{max, Ordering};
 use std::{collections::HashMap, fmt::Display};
 
 use crate::keypair::AuthorID;
 
+#[derive(Clone)]
 pub struct LWWRegisterCRDT<'a, T>
 where
     T: Clone + Display,
 {
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
+    pub path: Vec<PathSegment>,
     value: Op<T>,
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
     highest_seq: SequenceNumber,
@@ -20,13 +22,14 @@ impl<T> LWWRegisterCRDT<'_, T>
 where
     T: Clone + Display,
 {
-    pub fn new(keypair: &Ed25519KeyPair) -> LWWRegisterCRDT<'_, T> {
+    pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> LWWRegisterCRDT<'_, T> {
         let id = keypair.public().0.to_bytes();
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         LWWRegisterCRDT {
             our_id: id,
             keypair,
+            path,
             value: Op::make_root(),
             logical_clocks,
             highest_seq: 0,
@@ -44,6 +47,7 @@ where
             self.our_seq() + 1,
             false,
             Some(val),
+            self.path.to_owned(),
             self.keypair,
         );
         self.apply(op.clone());
@@ -60,11 +64,11 @@ where
         let seq = op.sequence_num();
 
         // take most recent update by sequence number
-        match seq.cmp(&self.value.sequence_num()) {
+        match seq.cmp(&self.our_seq()) {
             Ordering::Greater => self.value = op,
             Ordering::Equal => {
                 // if we are equal, tie break on author
-                if op.author() > self.value.author() {
+                if op.author() < self.our_id {
                     self.value = op
                 }
             }
@@ -82,6 +86,12 @@ where
     }
 }
 
+impl<'a, T> Display for LWWRegisterCRDT<'a, T> where T: Display + Clone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.value.id)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::LWWRegisterCRDT;
@@ -90,7 +100,7 @@ mod test {
     #[test]
     fn test_lww_simple() {
         let key = make_keypair();
-        let mut register = LWWRegisterCRDT::new(&key);
+        let mut register = LWWRegisterCRDT::new(&key, vec![]);
         assert_eq!(register.view(), None);
         register.set(1);
         assert_eq!(register.view(), Some(&1));
@@ -102,8 +112,8 @@ mod test {
     fn test_lww_multiple_writer() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut register1 = LWWRegisterCRDT::new(&key1);
-        let mut register2 = LWWRegisterCRDT::new(&key2);
+        let mut register1 = LWWRegisterCRDT::new(&key1, vec![]);
+        let mut register2 = LWWRegisterCRDT::new(&key2, vec![]);
         let _a = register1.set('a');
         let _b = register1.set('b');
         let _c = register2.set('c');
@@ -118,10 +128,10 @@ mod test {
     #[test]
     fn test_lww_idempotence() {
         let key = make_keypair();
-        let mut register = LWWRegisterCRDT::new(&key);
+        let mut register = LWWRegisterCRDT::new(&key, vec![]);
         let op = register.set(1);
         for _ in 1..10 {
-            register.apply(op);
+            register.apply(op.clone());
         }
         assert_eq!(register.view(), Some(&1));
     }
@@ -130,8 +140,8 @@ mod test {
     fn test_lww_consistent_tiebreak() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut register1 = LWWRegisterCRDT::new(&key1);
-        let mut register2 = LWWRegisterCRDT::new(&key2);
+        let mut register1 = LWWRegisterCRDT::new(&key1, vec![]);
+        let mut register2 = LWWRegisterCRDT::new(&key2, vec![]);
         let _a = register1.set('a');
         let _b = register2.set('b');
         register1.apply(_b);

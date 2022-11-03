@@ -7,6 +7,7 @@ use std::{
     fmt::Display,
 };
 
+#[derive(Clone)]
 pub struct ListCRDT<'a, T>
 where
     T: Clone + Display,
@@ -17,6 +18,9 @@ where
     /// Public key for this node
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
+    
+    /// Path to this CRDT
+    pub path: Vec<PathSegment>,
 
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
@@ -31,11 +35,11 @@ where
 
 impl<T> ListCRDT<'_, T>
 where
-    T: Eq + Display + Clone,
+    T: Display + Clone,
 {
     /// Create a new List CRDT with the given AuthorID.
     /// AuthorID should be unique.
-    pub fn new(keypair: &Ed25519KeyPair) -> ListCRDT<'_, T> {
+    pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> ListCRDT<'_, T> {
         // initialize other fields
         let id = keypair.public().0.to_bytes();
         let ops = vec![Op::make_root()];
@@ -44,6 +48,7 @@ where
         ListCRDT {
             our_id: id,
             keypair,
+            path,
             ops,
             message_q: HashMap::new(),
             logical_clocks,
@@ -64,6 +69,7 @@ where
             self.our_seq() + 1,
             false,
             Some(content),
+            self.path.to_owned(),
             self.keypair,
         );
         self.apply(op.clone());
@@ -78,6 +84,7 @@ where
             self.our_seq() + 1,
             true,
             None,
+            self.path.to_owned(),
             self.keypair,
         );
         self.apply(op.clone());
@@ -85,7 +92,7 @@ where
     }
 
     /// Find the idx of an operation with the given [`OpID`]
-    pub(crate) fn find(&self, id: OpID) -> Option<usize> {
+    pub fn find(&self, id: OpID) -> Option<usize> {
         self.ops.iter().position(|op| op.id == id)
     }
 
@@ -201,6 +208,12 @@ where
     }
 }
 
+impl<'a, T> Display for ListCRDT<'a, T> where T: Display + Clone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}]", self.ops.iter().map(|op| format!("{:?}", op.id)).collect::<Vec<_>>().join(", "))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{keypair::make_keypair, list_crdt::ListCRDT, op::ROOT_ID};
@@ -208,7 +221,7 @@ mod test {
     #[test]
     fn test_list_simple() {
         let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1);
+        let mut list = ListCRDT::new(&key1, vec![]);
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
@@ -219,10 +232,10 @@ mod test {
     #[test]
     fn test_list_idempotence() {
         let key = make_keypair();
-        let mut list = ListCRDT::new(&key);
+        let mut list = ListCRDT::new(&key, vec![]);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
-            list.apply(op);
+            list.apply(op.clone());
         }
         assert_eq!(list.view(), vec![&1]);
     }
@@ -230,7 +243,7 @@ mod test {
     #[test]
     fn test_list_delete() {
         let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1);
+        let mut list = ListCRDT::new(&key1, vec![]);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -242,7 +255,7 @@ mod test {
     #[test]
     fn test_list_interweave_chars() {
         let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1);
+        let mut list = ListCRDT::new(&key1, vec![]);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -253,12 +266,12 @@ mod test {
     fn test_list_conflicting_agents() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut list1 = ListCRDT::new(&key1);
-        let mut list2 = ListCRDT::new(&key2);
+        let mut list1 = ListCRDT::new(&key1, vec![]);
+        let mut list2 = ListCRDT::new(&key2, vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
-        list2.apply(_1_a);
+        list2.apply(_1_a.clone());
         let _2_b = list2.insert(_1_a.id, 'b');
-        list1.apply(_2_b);
+        list1.apply(_2_b.clone());
 
         let _2_d = list2.insert(ROOT_ID, 'd');
         let _2_y = list2.insert(_2_b.id, 'y');
@@ -277,10 +290,10 @@ mod test {
     fn test_list_delete_multiple_agent() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut list1 = ListCRDT::new(&key1);
-        let mut list2 = ListCRDT::new(&key2);
+        let mut list1 = ListCRDT::new(&key1, vec![]);
+        let mut list2 = ListCRDT::new(&key2, vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
-        list2.apply(_1_a);
+        list2.apply(_1_a.clone());
         let _2_b = list2.insert(_1_a.id, 'b');
         let del_1_a = list1.delete(_1_a.id);
         list1.apply(_2_b);
@@ -293,7 +306,7 @@ mod test {
     #[test]
     fn test_list_nested() {
         let key1 = make_keypair();
-        let mut list1 = ListCRDT::new(&key1);
+        let mut list1 = ListCRDT::new(&key1, vec![]);
         let _c = list1.insert(ROOT_ID, 'c');
         let _a = list1.insert(ROOT_ID, 'a');
         let _d = list1.insert(_c.id, 'd');

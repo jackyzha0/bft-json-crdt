@@ -1,52 +1,37 @@
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
-use std::{
-    cmp::{max, Ordering},
-    fmt::{Formatter, Result},
-};
+use std::cmp::{max, Ordering};
 
-use crate::op::{Op, OpID, SequenceNumber, ROOT_ID};
+use crate::op::{join_path, parse_field, Op, OpID, PathSegment, SequenceNumber, ROOT_ID};
 use std::{collections::HashMap, fmt::Display};
 
 use crate::keypair::AuthorID;
 
+#[derive(Clone)]
 pub struct MapCRDT<'a, T>
 where
     T: Clone + Display,
 {
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
-    table: HashMap<String, Op<Register<T>>>,
+    pub path: Vec<PathSegment>,
+    table: HashMap<String, Op<T>>,
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
     highest_seq: SequenceNumber,
-    message_q: HashMap<OpID, Vec<Op<Register<T>>>>,
-}
-
-#[derive(Clone)]
-pub struct Register<T: Display + Clone> {
-    key: String,
-    value: T,
-}
-
-impl<T> Display for Register<T>
-where
-    T: Clone + Display,
-{
-    fn fmt(&self, f: &mut Formatter) -> Result {
-        write!(f, "\"{}\": {}", self.key, self.value)
-    }
+    message_q: HashMap<OpID, Vec<Op<T>>>,
 }
 
 impl<T> MapCRDT<'_, T>
 where
     T: Clone + Display,
 {
-    pub fn new(keypair: &Ed25519KeyPair) -> MapCRDT<'_, T> {
+    pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> MapCRDT<'_, T> {
         let id = keypair.public().0.to_bytes();
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         MapCRDT {
             our_id: id,
             keypair,
+            path,
             table: HashMap::new(),
             logical_clocks,
             highest_seq: 0,
@@ -58,43 +43,45 @@ where
         *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
-    fn find(&self, id: OpID) -> Option<&String> {
-        self.table
-            .values()
-            .find(|op| op.id == id && op.content.is_some())
-            .map(|op| {
-                let Register { key, value: _ } = op.content.as_ref().unwrap();
-                key
-            })
+    pub fn find(&self, id: OpID) -> Option<String> {
+        for (k, v) in &self.table {
+            if v.id == id {
+                return Some(k.to_string());
+            }
+        }
+        None
     }
 
-    pub fn set(&mut self, key: String, value: T) -> Op<Register<T>> {
+    pub fn set(&mut self, key: String, value: T) -> Op<T> {
+        let new_path = join_path(self.path.to_owned(), PathSegment::Field(key));
         let op = Op::new(
             ROOT_ID,
             self.our_id,
             self.our_seq() + 1,
             false,
-            Some(Register { key, value }),
+            Some(value),
+            new_path,
             self.keypair,
         );
         self.apply(op.clone());
         op
     }
 
-    pub fn delete(&mut self, op_id: OpID) -> Op<Register<T>> {
+    pub fn delete(&mut self, op_id: OpID) -> Op<T> {
         let op = Op::new(
             op_id,
             self.our_id,
             self.our_seq() + 1,
             true,
             None,
+            self.path.to_owned(),
             self.keypair,
         );
         self.apply(op.clone());
         op
     }
 
-    pub fn apply(&mut self, op: Op<Register<T>>) {
+    pub fn apply(&mut self, op: Op<T>) {
         #[cfg(feature = "bft")]
         if !op.is_valid() {
             return;
@@ -126,19 +113,19 @@ where
         }
     }
 
-    fn integrate(&mut self, new_op: Op<Register<T>>) {
+    fn integrate(&mut self, new_op: Op<T>) {
         if new_op.is_deleted {
             let maybe_old = self.find(new_op.origin);
             if let Some(key) = maybe_old {
-                self.table.get_mut(&key.to_owned()).unwrap().is_deleted = true;
+                self.table.get_mut(&key).unwrap().is_deleted = true;
             }
             return;
         }
 
         // content is guaranteed to be non-None as per op.is_valid()
         let seq = new_op.sequence_num();
-        let Register { key, value: _ } = new_op.content.as_ref().unwrap();
-        let old_op = self.table.get(key);
+        let key = parse_field(new_op.path.clone()).unwrap();
+        let old_op = self.table.get(&key);
         let old_seq = old_op.map(|op| op.sequence_num()).unwrap_or(0);
         let old_author = old_op.map(|op| op.author()).unwrap_or_default();
 
@@ -161,11 +148,29 @@ where
         let mut res = HashMap::new();
         self.table.iter().for_each(|(_, op)| {
             if op.content.is_some() && !op.is_deleted {
-                let register = op.content.as_ref().unwrap();
-                res.insert(register.key.clone(), &register.value);
+                let value = op.content.as_ref().unwrap();
+                let key = parse_field(op.path.clone()).unwrap();
+                res.insert(key, value);
             }
         });
         res
+    }
+}
+
+impl<'a, T> Display for MapCRDT<'a, T>
+where
+    T: Display + Clone,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ {} }}",
+            self.table
+                .iter()
+                .map(|(k, v)| format!("{k}: {:?}", v.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -179,7 +184,7 @@ mod test {
     #[test]
     fn test_map_simple() {
         let key = make_keypair();
-        let mut map = MapCRDT::new(&key);
+        let mut map = MapCRDT::new(&key, vec![]);
         assert_eq!(map.view().keys().len(), 0);
         map.set("asdf".to_string(), 3);
         assert_eq!(map.view().keys().len(), 1);
@@ -194,7 +199,7 @@ mod test {
     #[test]
     fn test_map_delete() {
         let key = make_keypair();
-        let mut map = MapCRDT::new(&key);
+        let mut map = MapCRDT::new(&key, vec![]);
         let _a = map.set("a".to_string(), 'a');
         assert_eq!(map.view().keys().len(), 1);
         map.delete(_a.id);
@@ -208,7 +213,7 @@ mod test {
     #[test]
     fn test_map_idempotence() {
         let key = make_keypair();
-        let mut map = MapCRDT::new(&key);
+        let mut map = MapCRDT::new(&key, vec![]);
         let op = map.set("a".to_string(), 1);
         let _op2 = map.set("a".to_string(), 2);
         for _ in 1..10 {
@@ -222,8 +227,8 @@ mod test {
     fn test_map_interleaving_access() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut map1 = MapCRDT::new(&key1);
-        let mut map2 = MapCRDT::new(&key2);
+        let mut map1 = MapCRDT::new(&key1, vec![]);
+        let mut map2 = MapCRDT::new(&key2, vec![]);
 
         let _a = map1.set("a".to_string(), 'a');
         let _b = map2.set("b".to_string(), 'b');

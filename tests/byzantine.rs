@@ -27,7 +27,7 @@ fn test_equivocation() {
     // make a fake operation with same id as _b
     let fake_op = Op {
         content: Some('c'),
-        .._b
+        .._b.clone()
     };
 
     // also try modifying the sequence number
@@ -59,6 +59,7 @@ fn test_forge_update() {
         origin: _a.id,
         author: list.our_id, // pretend to be the owner of list
         content: Some('b'),
+        tag: None,
         seq: 1,
         is_deleted: false,
         id: ROOT_ID, // placeholder, to be generated

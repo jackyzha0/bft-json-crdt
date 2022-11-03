@@ -1,8 +1,8 @@
-use fastcrypto::Verifier;
 use fastcrypto::ed25519::Ed25519KeyPair;
 use fastcrypto::ed25519::Ed25519PublicKey;
 use fastcrypto::ed25519::Ed25519Signature;
 use fastcrypto::traits::ToFromBytes;
+use fastcrypto::Verifier;
 use sha2::Digest;
 use sha2::Sha256;
 use std::fmt::Display;
@@ -18,8 +18,29 @@ pub type SequenceNumber = u64;
 pub type OpID = [u8; 32];
 pub const ROOT_ID: OpID = [0u8; 32];
 
+/// Part of a path to get to a specific CRDT in a nested CRDT
+#[derive(Clone, Debug)]
+pub enum PathSegment {
+    Field(String),
+    Index(OpID),
+}
+
+pub fn join_path(path: Vec<PathSegment>, segment: PathSegment) -> Vec<PathSegment> {
+    let mut p = path.clone();
+    p.push(segment);
+    p
+}
+
+pub fn parse_field(path: Vec<PathSegment>) -> Option<String> {
+    if let PathSegment::Field(key) = path.last().unwrap() {
+        Some(key.to_string())
+    } else {
+        None
+    }
+}
+
 /// Represents a single node in a CRDT
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Op<T>
 where
     T: Clone,
@@ -30,6 +51,7 @@ where
     pub author: AuthorID, // pub key of author
     pub seq: SequenceNumber,
     pub content: Option<T>,
+    pub path: Vec<PathSegment>, // path to get to target CRDT
     pub is_deleted: bool,
 
     // Fields that are used to detect faults/tampering
@@ -58,6 +80,7 @@ where
         seq: SequenceNumber,
         is_deleted: bool,
         content: Option<T>,
+        path: Vec<PathSegment>,
         keypair: &Ed25519KeyPair,
     ) -> Op<T> {
         let mut op = Self {
@@ -68,6 +91,7 @@ where
             seq,
             is_deleted,
             content,
+            path,
         };
         op.id = op.hash();
         op.signed_digest = sign(keypair, &op.id).sig.to_bytes();
@@ -77,20 +101,16 @@ where
     pub fn hash(&self) -> OpID {
         let content_str = match self.content.as_ref() {
             Some(content) => format!("{content}"),
-            None => "".to_string()
+            None => "".to_string(),
         };
         let fmt_str = format!(
-            "{:?},{:?},{:?},{:?},{}",
-            self.origin,
-            self.author,
-            self.seq,
-            self.is_deleted,
-            content_str
+            "{:?},{:?},{:?},{:?},{},{:?}",
+            self.origin, self.author, self.seq, self.is_deleted, content_str, self.path,
         );
         let mut hasher = Sha256::new();
         hasher.update(fmt_str.as_bytes());
         let result = hasher.finalize();
-        let mut bytes: [u8; 32] = Default::default();
+        let mut bytes = [0u8; 32];
         bytes.copy_from_slice(&result[..]);
         bytes
     }
@@ -125,6 +145,7 @@ where
             seq: 0,
             is_deleted: false,
             content: None,
+            path: vec![],
         }
     }
 }
