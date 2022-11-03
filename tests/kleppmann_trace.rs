@@ -39,7 +39,7 @@ fn get_trace() -> Trace {
 fn test_editing_trace() {
     let t = get_trace();
     let key = make_keypair();
-    let mut list = ListCRDT::<char>::new(&key);
+    let mut list = ListCRDT::<char>::new(&key, vec![]);
     let mut ops: Vec<OpID> = Vec::new();
     ops.push(ROOT_ID);
     let start = PreciseTime::now();
@@ -58,7 +58,7 @@ fn test_editing_trace() {
             10_000 | 100_000 => {
                 let end = PreciseTime::now();
                 let runtime_sec = start.to(end);
-                println!("took {:?} to run {i} ops", runtime_sec);
+                println!("took {runtime_sec:?} to run {i} ops");
             }
             _ => {}
         };
@@ -66,7 +66,7 @@ fn test_editing_trace() {
 
     let end = PreciseTime::now();
     let runtime_sec = start.to(end);
-    println!("took {:?} to finish", runtime_sec);
+    println!("took {runtime_sec:?} to finish");
     let result = list.iter().collect::<String>();
     let expected = t.final_text;
     assert_eq!(result.len(), expected.len());

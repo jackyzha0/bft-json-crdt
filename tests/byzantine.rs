@@ -20,7 +20,7 @@ use bft_json_crdt::{
 #[test]
 fn test_equivocation() {
     let key = make_keypair();
-    let mut list = ListCRDT::<char>::new(&key);
+    let mut list = ListCRDT::<char>::new(&key, vec![]);
     let _a = list.insert(ROOT_ID, 'a');
     let _b = list.insert(_a.id, 'b');
 
@@ -51,7 +51,7 @@ fn test_forge_update() {
     // this implicity generates its own keypair
     // its public key is stored as list.our_id
     let key = make_keypair();
-    let mut list = ListCRDT::<char>::new(&key);
+    let mut list = ListCRDT::<char>::new(&key, vec![]);
     let _a = list.insert(ROOT_ID, 'a');
 
     let keypair = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id
@@ -59,7 +59,7 @@ fn test_forge_update() {
         origin: _a.id,
         author: list.our_id, // pretend to be the owner of list
         content: Some('b'),
-        tag: None,
+        path: vec![],
         seq: 1,
         is_deleted: false,
         id: ROOT_ID, // placeholder, to be generated

@@ -21,9 +21,9 @@ fn test_list_fuzz_commutative() {
     let key1 = make_keypair();
     let key2 = make_keypair();
     let keychk = make_keypair();
-    let mut l1 = ListCRDT::<char>::new(&key1);
-    let mut l2 = ListCRDT::<char>::new(&key2);
-    let mut chk = ListCRDT::<char>::new(&keychk);
+    let mut l1 = ListCRDT::<char>::new(&key1, vec![]);
+    let mut l2 = ListCRDT::<char>::new(&key2, vec![]);
+    let mut chk = ListCRDT::<char>::new(&keychk, vec![]);
     for _ in 0..TEST_N {
         let letter1: char = rng.gen_range(b'a'..=b'z') as char;
         let letter2: char = rng.gen_range(b'a'..=b'z') as char;
@@ -102,9 +102,9 @@ fn test_map_fuzz_commutative() {
     let key1 = make_keypair();
     let key2 = make_keypair();
     let keychk = make_keypair();
-    let mut l1 = MapCRDT::<char>::new(&key1);
-    let mut l2 = MapCRDT::<char>::new(&key2);
-    let mut chk = MapCRDT::<char>::new(&keychk);
+    let mut l1 = MapCRDT::<char>::new(&key1, vec![]);
+    let mut l2 = MapCRDT::<char>::new(&key2, vec![]);
+    let mut chk = MapCRDT::<char>::new(&keychk, vec![]);
     let keys = vec!["abc", "123", "test", "cool", "and", "good"];
     for _ in 0..TEST_N {
         let letter1: char = rng.gen_range(b'a'..=b'z') as char;

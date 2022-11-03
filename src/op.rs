@@ -26,7 +26,7 @@ pub enum PathSegment {
 }
 
 pub fn join_path(path: Vec<PathSegment>, segment: PathSegment) -> Vec<PathSegment> {
-    let mut p = path.clone();
+    let mut p = path;
     p.push(segment);
     p
 }
@@ -104,8 +104,8 @@ where
             None => "".to_string(),
         };
         let fmt_str = format!(
-            "{:?},{:?},{:?},{:?},{},{:?}",
-            self.origin, self.author, self.seq, self.is_deleted, content_str, self.path,
+            "{:?},{:?},{:?},{:?},{content_str},{:?}",
+            self.origin, self.author, self.seq, self.is_deleted, self.path,
         );
         let mut hasher = Sha256::new();
         hasher.update(fmt_str.as_bytes());

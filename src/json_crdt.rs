@@ -79,16 +79,16 @@ pub trait IntoCRDT<'a, T> {
     fn into_crdt(self) -> ConcreteCRDT<'a, T>;
 }
 
-#[cfg(test)]
-mod test {
-    use bft_crdt_derive::IntoCRDT;
-
-    #[test]
-    fn test_derive_basic() {
-        #[derive(IntoCRDT)]
-        struct Player {
-            x: f32,
-            y: f32,
-        }
-    }
-}
+// #[cfg(test)]
+// mod test {
+//     use bft_crdt_derive::IntoCRDT;
+//
+//     #[test]
+//     fn test_derive_basic() {
+//         #[derive(IntoCRDT)]
+//         struct Player {
+//             x: f32,
+//             y: f32,
+//         }
+//     }
+// }
