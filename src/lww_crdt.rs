@@ -1,4 +1,5 @@
-use crate::op::{Op, SequenceNumber, PathSegment};
+use crate::json_crdt::{IntoCRDT, CRDT};
+use crate::op::{Op, PathSegment, SequenceNumber};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 use std::cmp::{max, Ordering};
 use std::{collections::HashMap, fmt::Display};
@@ -81,12 +82,30 @@ where
         self.logical_clocks.insert(self.our_id, self.highest_seq);
     }
 
-    pub fn view(&self) -> Option<&T> {
+    fn view(&self) -> Option<&T> {
         self.value.content.as_ref()
     }
 }
 
-impl<'a, T> Display for LWWRegisterCRDT<'a, T> where T: Display + Clone {
+impl<'t, T> CRDT<'t> for LWWRegisterCRDT<'t, T>
+where
+    T: Display + Clone + IntoCRDT<To<'t> = Self> + 't,
+{
+    type From = T;
+
+    fn apply(&mut self, op: Op<Self::From>) {
+        self.apply(op)
+    }
+
+    fn view(&self) -> Option<&Self::From> {
+        self.view()
+    }
+}
+
+impl<'a, T> Display for LWWRegisterCRDT<'a, T>
+where
+    T: Display + Clone,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value.id)
     }

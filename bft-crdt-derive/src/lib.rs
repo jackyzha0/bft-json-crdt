@@ -1,66 +1,82 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::{quote, quote_spanned};
-use syn::parse::Parser;
-use syn::spanned::Spanned;
 use syn::{
-    parse_macro_input, parse_quote, Data, DeriveInput, Field, Fields, GenericParam, Generics, Index,
+    Type,
+    parse::Parser, parse_macro_input, parse_quote, spanned::Spanned, Data, DeriveInput, Field,
+    Fields, GenericParam, Generics, Index,
 };
 
 #[proc_macro_derive(IntoCRDT)]
 pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // Parse the input tokens into a syntax tree.
-    let mut input = parse_macro_input!(input as DeriveInput);
+    let input = parse_macro_input!(input as DeriveInput);
 
     // Used in the quasi-quotation below as `#name`.
-    let name = input.ident;
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    let ident = input.ident.clone();
+    let s = format!("{ident}CRDT");
+    let crdt_ident = Ident::new_raw(&*s, input.span());
 
-    // make sure:
-    // - each field is
-    //  - private
-    //  - is of type (then add appropriate $ident() fn)
-    //   - Terminal -> wrap in LWW
-    //   - Vec<Terminal | JsonCRDT> -> 
-    //   - HashMap<Terminal | JsonCRDT> -> literally just return the crdt
-    // then implement:
-    // - init_crdt(&mut self) -> ConcreteCRDT<'a, #name>
-    // - apply(&mut self, op: Op<Terminal>)
-    // - view(&self) -> #name
-    add_new_fields(&mut input.data);
+    // new fields
+    match input.data {
+        Data::Struct(data) => match data.fields {
+            Fields::Named(fields) => {
+                let new_fields = fields.named.iter().map(|f| {
+                    let ident = f.ident.as_ref().unwrap();
+                    Field::parse_named
+                        .parse2(quote! {
+                            #ident: String
+                        })
+                        .unwrap()
+                });
 
-    let expanded = quote! {
-        // The generated impl.
-        impl #impl_generics super::IntoCRDT<'_, #name> for #name #ty_generics #where_clause {
-            // idents
-        }
+                let expanded = quote! {
+                    struct #crdt_ident {
+                        #(#new_fields),*
+                        // todo
+                    }
 
-        impl #impl_generics super::CRDT<#name> for #name #ty_generics #where_clause {
-            // idents
-        }
-    };
+                    impl IntoCRDT for #ident {
+                        type To = #crdt_ident;
+                        fn to_crdt(self, keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> Self::To {
+                            // todo
+                            unimplemented!()
+                        }
+                    }
 
-    // Hand the output tokens back to the compiler.
-    proc_macro::TokenStream::from(expanded)
-}
+                    impl CRDT for #crdt_ident {
+                        type From = #ident;
+                        fn apply(&mut self, op: Op<Self::From>) {
+                            // todo
+                            unimplemented!()
+                        }
 
-// Generate an expression to sum up the heap size of each field.
-fn add_new_fields(data: &mut Data) -> Option<TokenStream> {
-    match *data {
-        Data::Struct(ref mut data) => {
-            if let Fields::Named(fields) = &mut data.fields {
-                fields
-                    .named
-                    .push(Field::parse_named.parse2(quote! { pub a: String }).unwrap());
+                        fn view(&self) -> Option<&Self::From> {
+                            // todo
+                            unimplemented!()
+                        } 
+                    }
+
+                    impl<'a> BaseCRDT<'a, #crdt_ident> {
+                        fn new(doc: #ident, keypair: &'a Ed25519KeyPair) -> Self {
+                            let id = keypair.public().0.to_bytes();
+                            Self {
+                                id,
+                                keypair,
+                                doc: doc.to_crdt(&keypair, vec![]),
+                                path: vec![]
+                            }
+                        }
+                    }
+                };
+
+                // Hand the output tokens back to the compiler
+                expanded.into()
             }
-            None
-        }
-        Data::Enum(ref data) => Some(quote_spanned! {
-            data.enum_token.span => compile_error!("`JsonCRDT` can only be derived on structs!");
-
-        }),
-        Data::Union(ref data) => Some(quote_spanned! {
-            data.union_token.span => compile_error!("`JsonCRDT` can only be derived on structs!");
-
-        }),
+            _ => {
+                return quote! { compile_error!("All fields must be named and initialized"); }
+                    .into()
+            }
+        },
+        _ => return quote! { compile_error!("IntoCRDT can only be derived on structs"); }.into(),
     }
 }
