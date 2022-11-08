@@ -1,15 +1,21 @@
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
-use std::cmp::{max, Ordering};
+use std::{
+    cmp::{max, Ordering},
+    fmt::Debug,
+};
 
-use crate::op::{join_path, parse_field, Op, OpID, PathSegment, SequenceNumber, ROOT_ID};
-use std::{collections::HashMap, fmt::Display};
+use crate::{
+    json_crdt::CRDT,
+    op::{join_path, parse_field, Hashable, Op, OpID, PathSegment, SequenceNumber, ROOT_ID},
+};
+use std::collections::HashMap;
 
 use crate::keypair::AuthorID;
 
 #[derive(Clone)]
 pub struct MapCRDT<'a, T>
 where
-    T: Clone + Display,
+    T: Clone + Hashable,
 {
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
@@ -22,7 +28,7 @@ where
 
 impl<T> MapCRDT<'_, T>
 where
-    T: Clone + Display,
+    T: Clone + Hashable,
 {
     pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> MapCRDT<'_, T> {
         let id = keypair.public().0.to_bytes();
@@ -144,11 +150,11 @@ where
         };
     }
 
-    pub fn view(&self) -> HashMap<String, &T> {
+    pub fn view(&self) -> HashMap<String, T> {
         let mut res = HashMap::new();
         self.table.iter().for_each(|(_, op)| {
             if op.content.is_some() && !op.is_deleted {
-                let value = op.content.as_ref().unwrap();
+                let value = op.content.to_owned().unwrap();
                 let key = parse_field(op.path.clone()).unwrap();
                 res.insert(key, value);
             }
@@ -157,9 +163,9 @@ where
     }
 }
 
-impl<'a, T> Display for MapCRDT<'a, T>
+impl<'a, T> Debug for MapCRDT<'a, T>
 where
-    T: Display + Clone,
+    T: Hashable + Clone,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -171,6 +177,25 @@ where
                 .collect::<Vec<_>>()
                 .join(", ")
         )
+    }
+}
+
+impl<'t, T> CRDT<'t> for MapCRDT<'t, T>
+where
+    T: Hashable + Clone + 't,
+{
+    type Inner = T;
+    type View = HashMap<String, T>;
+    fn apply(&mut self, op: Op<Self::Inner>) {
+        self.apply(op)
+    }
+
+    fn view(&self) -> Self::View {
+        self.view()
+    }
+
+    fn new(keypair: &'t Ed25519KeyPair, path: Vec<PathSegment>) -> Self {
+        Self::new(keypair, path)
     }
 }
 
@@ -188,12 +213,12 @@ mod test {
         assert_eq!(map.view().keys().len(), 0);
         map.set("asdf".to_string(), 3);
         assert_eq!(map.view().keys().len(), 1);
-        assert_eq!(map.view().get("asdf").unwrap(), &&3);
+        assert_eq!(map.view().get("asdf").unwrap(), &3);
         map.set("test".to_string(), 1);
         map.set("asdf".to_string(), 5);
         assert_eq!(map.view().keys().len(), 2);
-        assert_eq!(map.view().get("asdf").unwrap(), &&5);
-        assert_eq!(map.view().get("test").unwrap(), &&1);
+        assert_eq!(map.view().get("asdf").unwrap(), &5);
+        assert_eq!(map.view().get("test").unwrap(), &1);
     }
 
     #[test]
@@ -207,7 +232,7 @@ mod test {
         map.apply(_a);
         assert_eq!(map.view().keys().len(), 0);
         let _b = map.set("a".to_string(), 'b');
-        assert_eq!(map.view().get("a").unwrap(), &&'b');
+        assert_eq!(map.view().get("a").unwrap(), &'b');
     }
 
     #[test]
@@ -219,7 +244,7 @@ mod test {
         for _ in 1..10 {
             map.apply(op.clone());
         }
-        assert_eq!(map.view().get("a").unwrap(), &&2);
+        assert_eq!(map.view().get("a").unwrap(), &2);
         assert_eq!(map.view().keys().len(), 1);
     }
 

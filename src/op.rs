@@ -5,8 +5,9 @@ use fastcrypto::traits::ToFromBytes;
 use fastcrypto::Verifier;
 use sha2::Digest;
 use sha2::Sha256;
-use std::fmt::Display;
+use std::fmt::Debug;
 
+use crate::keypair::lsb_32;
 use crate::keypair::sign;
 use crate::keypair::AuthorID;
 use crate::keypair::SignedDigest;
@@ -23,6 +24,18 @@ pub const ROOT_ID: OpID = [0u8; 32];
 pub enum PathSegment {
     Field(String),
     Index(OpID),
+}
+
+pub fn print_path(path: Vec<PathSegment>) -> String {
+    path.iter()
+        .map(|p| {
+            match p {
+                PathSegment::Field(s) => s.to_string(),
+                PathSegment::Index(i) => lsb_32(*i).to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 pub fn join_path(path: Vec<PathSegment>, segment: PathSegment) -> Vec<PathSegment> {
@@ -62,9 +75,22 @@ where
     pub signed_digest: SignedDigest, // signed hash using priv key of author
 }
 
+pub trait Hashable {
+    fn hash(&self) -> String;
+}
+
+impl<T> Hashable for T
+where
+    T: Debug,
+{
+    fn hash(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 impl<T> Op<T>
 where
-    T: Clone + Display,
+    T: Clone + Hashable,
 {
     pub fn author(&self) -> AuthorID {
         self.author
@@ -100,7 +126,7 @@ where
 
     pub fn hash(&self) -> OpID {
         let content_str = match self.content.as_ref() {
-            Some(content) => format!("{content}"),
+            Some(content) => content.hash(),
             None => "".to_string(),
         };
         let fmt_str = format!(

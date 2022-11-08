@@ -1,4 +1,4 @@
-use fastcrypto::{
+pub use fastcrypto::{
     ed25519::{
         Ed25519KeyPair, Ed25519PublicKey, Ed25519Signature, ED25519_PUBLIC_KEY_LENGTH,
         ED25519_SIGNATURE_LENGTH,

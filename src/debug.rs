@@ -1,8 +1,7 @@
 use crate::{
     list_crdt::ListCRDT,
-    op::{Op, OpID},
+    op::{Op, OpID, Hashable},
 };
-use std::fmt::Display;
 
 #[cfg(feature = "logging")]
 use {
@@ -14,7 +13,7 @@ use {
 
 #[cfg(feature = "logging")]
 fn author_to_hex(author: AuthorID) -> String {
-    format!("{:#x}", lsb_32(author)).to_string()
+    format!("{:#x}", lsb_32(author))
 }
 
 #[cfg(feature = "logging")]
@@ -44,7 +43,7 @@ fn display_author(author: AuthorID) -> String {
 
 impl<T> ListCRDT<'_, T>
 where
-    T: Display + Clone,
+    T: Hashable + Clone,
 {
     #[cfg(not(feature = "logging"))]
     pub fn log_ops(&self, _: Option<OpID>) {}
@@ -55,14 +54,14 @@ where
 
         // do in-order traversal
         let res: Vec<&Op<T>> = self.ops.iter().collect();
-        if res.len() == 0 {
-            println!("{}", "[empty]".to_string());
+        if res.is_empty() {
+            println!("[empty]");
         }
 
         // figure out parent-child hierarchies from origins
         let mut parent_child_map: HashMap<OpID, Vec<OpID>> = HashMap::new();
         for op in &res {
-            let children = parent_child_map.entry(op.origin).or_insert(Vec::new());
+            let children = parent_child_map.entry(op.origin).or_default();
             children.push(op.id);
         }
 
@@ -87,7 +86,7 @@ where
             if let Some(prev) = prev {
                 if origin_id == prev {
                     // went down one layer, add to stack
-                    let stack_prefix_char = if is_last(&origin) { "  " } else { "│ " };
+                    let stack_prefix_char = if is_last(origin) { "  " } else { "│ " };
                     stack.push((prev, stack_prefix_char));
                 }
             }
@@ -115,7 +114,7 @@ where
             } else {
                 op.content
                     .as_ref()
-                    .map_or("[empty]".to_string(), |c| c.to_string())
+                    .map_or("[empty]".to_string(), |c| c.hash())
             };
             if op.is_deleted && op.id != ROOT_ID {
                 lines.push(format!(
@@ -140,13 +139,10 @@ where
         }
 
         // full string
-        let flat = format!(
-            "{}",
-            self.iter()
-                .map(|t| t.to_string())
+        let flat = self.iter()
+                .map(|t| t.hash())
                 .collect::<Vec<_>>()
-                .join("")
-        );
+                .join("");
         lines.push(format!("Flattened result: {}", flat));
         println!("{}", lines.join("\n"));
     }
@@ -171,7 +167,7 @@ where
             display_author(self.our_id),
             display_op_id(op),
             op.sequence_num(),
-            op.content.as_ref().unwrap(),
+            op.content.as_ref().unwrap().hash(),
             display_op_id(op)
         );
     }

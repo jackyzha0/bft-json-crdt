@@ -41,7 +41,7 @@ fn test_equivocation() {
     list.apply(fake_op_seq);
 
     // make sure it doesnt accept either of the fake operations
-    assert_eq!(list.view(), vec![&'a', &'b']);
+    assert_eq!(list.view(), vec!['a', 'b']);
 }
 
 
@@ -74,6 +74,6 @@ fn test_forge_update() {
     list.apply(op);
 
     // make sure it doesnt accept fake operation
-    assert_eq!(list.view(), vec![&'a']);
+    assert_eq!(list.view(), vec!['a']);
 }
 

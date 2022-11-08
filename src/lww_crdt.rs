@@ -1,15 +1,16 @@
-use crate::json_crdt::{IntoCRDT, CRDT};
-use crate::op::{Op, PathSegment, SequenceNumber};
+use crate::json_crdt::CRDT;
+use crate::op::{Hashable, Op, PathSegment, SequenceNumber};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 use std::cmp::{max, Ordering};
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
+use std::fmt::Debug;
 
 use crate::keypair::AuthorID;
 
 #[derive(Clone)]
 pub struct LWWRegisterCRDT<'a, T>
 where
-    T: Clone + Display,
+    T: Clone + Hashable,
 {
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
@@ -21,7 +22,7 @@ where
 
 impl<T> LWWRegisterCRDT<'_, T>
 where
-    T: Clone + Display,
+    T: Clone + Hashable,
 {
     pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> LWWRegisterCRDT<'_, T> {
         let id = keypair.public().0.to_bytes();
@@ -82,29 +83,33 @@ where
         self.logical_clocks.insert(self.our_id, self.highest_seq);
     }
 
-    fn view(&self) -> Option<&T> {
-        self.value.content.as_ref()
+    fn view(&self) -> Option<T> {
+        self.value.content.to_owned()
     }
 }
 
 impl<'t, T> CRDT<'t> for LWWRegisterCRDT<'t, T>
 where
-    T: Display + Clone + IntoCRDT<To<'t> = Self> + 't,
+    T: Hashable + Clone + 't,
 {
-    type From = T;
-
-    fn apply(&mut self, op: Op<Self::From>) {
+    type Inner = T;
+    type View = Option<T>;
+    fn apply(&mut self, op: Op<Self::Inner>) {
         self.apply(op)
     }
 
-    fn view(&self) -> Option<&Self::From> {
+    fn view(&self) -> Self::View {
         self.view()
+    }
+
+    fn new(keypair: &'t Ed25519KeyPair, path: Vec<PathSegment>) -> Self {
+        Self::new(keypair, path)
     }
 }
 
-impl<'a, T> Display for LWWRegisterCRDT<'a, T>
+impl<'a, T> Debug for LWWRegisterCRDT<'a, T>
 where
-    T: Display + Clone,
+    T: Hashable + Clone,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value.id)
@@ -122,9 +127,9 @@ mod test {
         let mut register = LWWRegisterCRDT::new(&key, vec![]);
         assert_eq!(register.view(), None);
         register.set(1);
-        assert_eq!(register.view(), Some(&1));
+        assert_eq!(register.view(), Some(1));
         register.set(99);
-        assert_eq!(register.view(), Some(&99));
+        assert_eq!(register.view(), Some(99));
     }
 
     #[test]
@@ -136,12 +141,12 @@ mod test {
         let _a = register1.set('a');
         let _b = register1.set('b');
         let _c = register2.set('c');
-        assert_eq!(register2.view(), Some(&'c'));
+        assert_eq!(register2.view(), Some('c'));
         register1.apply(_c);
         register2.apply(_b);
         register2.apply(_a);
-        assert_eq!(register1.view(), Some(&'b'));
-        assert_eq!(register2.view(), Some(&'b'));
+        assert_eq!(register1.view(), Some('b'));
+        assert_eq!(register2.view(), Some('b'));
     }
 
     #[test]
@@ -152,7 +157,7 @@ mod test {
         for _ in 1..10 {
             register.apply(op.clone());
         }
-        assert_eq!(register.view(), Some(&1));
+        assert_eq!(register.view(), Some(1));
     }
 
     #[test]

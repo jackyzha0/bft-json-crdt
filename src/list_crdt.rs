@@ -1,16 +1,16 @@
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 
-use crate::{keypair::AuthorID, op::*};
+use crate::{json_crdt::CRDT, keypair::AuthorID, op::*};
 use std::{
     cmp::{max, Ordering},
     collections::HashMap,
-    fmt::Display,
+    fmt::Debug,
 };
 
 #[derive(Clone)]
 pub struct ListCRDT<'a, T>
 where
-    T: Clone + Display,
+    T: Clone + Hashable,
 {
     /// List of all the operations we know of
     pub(crate) ops: Vec<Op<T>>,
@@ -18,7 +18,7 @@ where
     /// Public key for this node
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
-    
+
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
 
@@ -35,7 +35,7 @@ where
 
 impl<T> ListCRDT<'_, T>
 where
-    T: Display + Clone,
+    T: Hashable + Clone,
 {
     /// Create a new List CRDT with the given AuthorID.
     /// AuthorID should be unique.
@@ -203,14 +203,44 @@ where
     }
 
     /// Convenience function to get a vector of visible list elements
-    pub fn view(&self) -> Vec<&T> {
-        self.iter().collect()
+    pub fn view(&self) -> Vec<T> {
+        self.iter().map(|i| i.to_owned()).collect()
     }
 }
 
-impl<'a, T> Display for ListCRDT<'a, T> where T: Display + Clone {
+impl<'a, T> Debug for ListCRDT<'a, T>
+where
+    T: Hashable + Clone,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}]", self.ops.iter().map(|op| format!("{:?}", op.id)).collect::<Vec<_>>().join(", "))
+        write!(
+            f,
+            "[{}]",
+            self.ops
+                .iter()
+                .map(|op| format!("{:?}", op.id))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+impl<'t, T> CRDT<'t> for ListCRDT<'t, T>
+where
+    T: Hashable + Clone + 't,
+{
+    type Inner = T;
+    type View = Vec<T>;
+    fn apply(&mut self, op: Op<Self::Inner>) {
+        self.apply(op)
+    }
+
+    fn view(&self) -> Self::View {
+        self.view()
+    }
+
+    fn new(keypair: &'t Ed25519KeyPair, path: Vec<PathSegment>) -> Self {
+        Self::new(keypair, path)
     }
 }
 
@@ -226,7 +256,7 @@ mod test {
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
         let _four = list.insert(_one.id, 4);
-        assert_eq!(list.view(), vec![&1, &4, &2, &3]);
+        assert_eq!(list.view(), vec![1, 4, 2, 3]);
     }
 
     #[test]
@@ -237,7 +267,7 @@ mod test {
         for _ in 1..10 {
             list.apply(op.clone());
         }
-        assert_eq!(list.view(), vec![&1]);
+        assert_eq!(list.view(), vec![1]);
     }
 
     #[test]
@@ -249,7 +279,7 @@ mod test {
         let _three = list.insert(ROOT_ID, 'c');
         list.delete(_one.id);
         list.delete(_two.id);
-        assert_eq!(list.view(), vec![&'c']);
+        assert_eq!(list.view(), vec!['c']);
     }
 
     #[test]
@@ -259,7 +289,7 @@ mod test {
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
-        assert_eq!(list.view(), vec![&'c', &'a', &'b']);
+        assert_eq!(list.view(), vec!['c', 'a', 'b']);
     }
 
     #[test]
@@ -282,7 +312,7 @@ mod test {
         list1.apply(_2_y);
         list1.apply(_2_d);
 
-        assert_eq!(list1.view(), vec![&'d', &'a', &'b', &'y', &'x']);
+        assert_eq!(list1.view(), vec!['d', 'a', 'b', 'y', 'x']);
         assert_eq!(list1.view(), list2.view());
     }
 
@@ -299,7 +329,7 @@ mod test {
         list1.apply(_2_b);
         list2.apply(del_1_a);
 
-        assert_eq!(list1.view(), vec![&'b']);
+        assert_eq!(list1.view(), vec!['b']);
         assert_eq!(list1.view(), list2.view());
     }
 
@@ -312,6 +342,6 @@ mod test {
         let _d = list1.insert(_c.id, 'd');
         let _b = list1.insert(_a.id, 'b');
 
-        assert_eq!(list1.view(), vec![&'a', &'b', &'c', &'d']);
+        assert_eq!(list1.view(), vec!['a', 'b', 'c', 'd']);
     }
 }
