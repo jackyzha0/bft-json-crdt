@@ -2,11 +2,11 @@ use bft_json_crdt::{
     keypair::make_keypair,
     list_crdt::ListCRDT,
     map_crdt::MapCRDT,
-    op::{Op, OpID, ROOT_ID},
+    op::{Op, OpID, ROOT_ID, Hashable},
 };
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
-fn random_op<T: Clone>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
+fn random_op<T: Clone + Hashable>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
     arr.choose(rng).map(|op| op.id).unwrap_or(ROOT_ID)
 }
 

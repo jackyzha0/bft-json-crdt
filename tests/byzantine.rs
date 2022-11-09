@@ -44,7 +44,6 @@ fn test_equivocation() {
     assert_eq!(list.view(), vec!['a', 'b']);
 }
 
-
 // case 2c
 #[test]
 fn test_forge_update() {
@@ -62,7 +61,7 @@ fn test_forge_update() {
         path: vec![],
         seq: 1,
         is_deleted: false,
-        id: ROOT_ID, // placeholder, to be generated
+        id: ROOT_ID,              // placeholder, to be generated
         signed_digest: [0u8; 64], // placeholder, to be generated
     };
 
@@ -76,4 +75,3 @@ fn test_forge_update() {
     // make sure it doesnt accept fake operation
     assert_eq!(list.view(), vec!['a']);
 }
-

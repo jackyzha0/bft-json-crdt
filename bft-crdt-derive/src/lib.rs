@@ -72,29 +72,56 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         Data::Struct(data) => match &data.fields {
             Fields::Named(fields) => {
                 let mut field_impls = vec![];
+                let mut ident_literals = vec![];
+                let mut ident_strings = vec![];
                 for field in &fields.named {
                     let ident = field.ident.as_ref().expect("Failed to get struct field identifier");
-                    let ty = match &field.ty {
-                        Type::Path(t) => t.to_token_stream(),
-                        _ => return quote_spanned! { field.span() => compile_error!("Field should be a primitive or struct which implements CRDT") }.into(),
-                    };
-                    let str_literal = LitStr::new(&*ident.to_string(), ident.span());
-                    field_impls.push(quote! {
-                        #ident: <#ty as CRDT>::new(
-                            keypair,
-                            #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#str_literal.to_string()))
-                        )
-                    });
+                    if ident != "path" {
+                        let ty = match &field.ty {
+                            Type::Path(t) => t.to_token_stream(),
+                            _ => return quote_spanned! { field.span() => compile_error!("Field should be a primitive or struct which implements CRDT") }.into(),
+                        };
+                        let str_literal = LitStr::new(&*ident.to_string(), ident.span());
+                        ident_strings.push(str_literal.clone());
+                        ident_literals.push(ident.clone());
+                        field_impls.push(quote! {
+                            #ident: <#ty as CRDT>::new(
+                                keypair,
+                                #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#str_literal.to_string()))
+                            )
+                        });
+                    }
                 }
 
                 let expanded = quote! {
                     impl #impl_generics #crate_name::json_crdt::CRDT #ty_generics for #ident #ty_generics #where_clause {
-                        type Inner = #ident #ty_generics;
+                        type Inner = #crate_name::json_crdt::Value;
                         type View = &#lt #ident #ty_generics;
 
                         fn apply(&mut self, op: #crate_name::op::Op<Self::Inner>) {
-                            // todo
-                            unimplemented!()
+                            // tried to assign to a struct field directly, invalid
+                            if self.path.len() >= op.path.len() {
+                                return;
+                            }
+
+                            let mut idx = 0;
+                            for (our_path_segment, op_path_segment) in self.path.iter().zip(op.path.iter()) {
+                                let ours = if let #crate_name::op::PathSegment::Field(f) = our_path_segment { Some(f) } else { None };
+                                let theirs = if let #crate_name::op::PathSegment::Field(f) = op_path_segment { Some(f) } else { None };
+                                if ours != theirs {
+                                    return;
+                                }
+                                idx += 1;
+                            }
+
+                            if let #crate_name::op::PathSegment::Field(path_seg) = &op.path[idx] {
+                                match &path_seg[..] {
+                                    #(#ident_strings => {
+                                        self.#ident_literals.apply(op.into());
+                                    }),*
+                                    _ => {},
+                                };
+                            };
                         }
 
                         fn view(&#lt self) -> Self::View {
@@ -103,6 +130,7 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
 
                         fn new(keypair: &#lt #crate_name::keypair::Ed25519KeyPair, path: Vec<#crate_name::op::PathSegment>) -> Self {
                             Self {
+                                path: path.clone(),
                                 #(#field_impls),*
                             }
                         }

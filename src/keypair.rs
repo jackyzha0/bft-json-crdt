@@ -31,4 +31,3 @@ pub fn sign(keypair: &Ed25519KeyPair, message: &[u8]) -> Ed25519Signature {
 pub fn verify(pubkey: Ed25519PublicKey, message: &[u8], signature: Ed25519Signature) -> bool {
     pubkey.verify(message, &signature).is_ok()
 }
-

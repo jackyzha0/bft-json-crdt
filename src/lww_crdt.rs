@@ -1,5 +1,5 @@
 use crate::json_crdt::CRDT;
-use crate::op::{Hashable, Op, PathSegment, SequenceNumber};
+use crate::op::{Op, PathSegment, SequenceNumber, Hashable};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ use crate::keypair::AuthorID;
 #[derive(Clone)]
 pub struct LWWRegisterCRDT<'a, T>
 where
-    T: Clone + Hashable,
+    T: Hashable + Clone,
 {
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
@@ -22,7 +22,7 @@ where
 
 impl<T> LWWRegisterCRDT<'_, T>
 where
-    T: Clone + Hashable,
+    T: Hashable + Clone,
 {
     pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> LWWRegisterCRDT<'_, T> {
         let id = keypair.public().0.to_bytes();

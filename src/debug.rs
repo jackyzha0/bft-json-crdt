@@ -1,11 +1,14 @@
 use crate::{
     list_crdt::ListCRDT,
-    op::{Op, OpID, Hashable},
+    op::{Hashable, Op, OpID},
 };
 
 #[cfg(feature = "logging")]
 use {
-    crate::{op::ROOT_ID, keypair::{lsb_32, AuthorID}},
+    crate::{
+        keypair::{lsb_32, AuthorID},
+        op::ROOT_ID,
+    },
     colored::Colorize,
     random_color::{Luminosity, RandomColor},
     std::collections::HashMap,
@@ -139,10 +142,7 @@ where
         }
 
         // full string
-        let flat = self.iter()
-                .map(|t| t.hash())
-                .collect::<Vec<_>>()
-                .join("");
+        let flat = self.iter().map(|t| t.hash()).collect::<Vec<_>>().join("");
         lines.push(format!("Flattened result: {}", flat));
         println!("{}", lines.join("\n"));
     }

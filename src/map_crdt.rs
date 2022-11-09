@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     json_crdt::CRDT,
-    op::{join_path, parse_field, Hashable, Op, OpID, PathSegment, SequenceNumber, ROOT_ID},
+    op::{join_path, parse_field, Op, OpID, PathSegment, SequenceNumber, ROOT_ID, Hashable},
 };
 use std::collections::HashMap;
 
@@ -15,7 +15,7 @@ use crate::keypair::AuthorID;
 #[derive(Clone)]
 pub struct MapCRDT<'a, T>
 where
-    T: Clone + Hashable,
+    T: Hashable + Clone,
 {
     pub our_id: AuthorID,
     keypair: &'a Ed25519KeyPair,
@@ -28,7 +28,7 @@ where
 
 impl<T> MapCRDT<'_, T>
 where
-    T: Clone + Hashable,
+    T: Hashable + Clone,
 {
     pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> MapCRDT<'_, T> {
         let id = keypair.public().0.to_bytes();

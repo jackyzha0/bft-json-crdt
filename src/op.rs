@@ -1,3 +1,8 @@
+use crate::json_crdt::Value;
+use crate::keypair::lsb_32;
+use crate::keypair::sign;
+use crate::keypair::AuthorID;
+use crate::keypair::SignedDigest;
 use fastcrypto::ed25519::Ed25519KeyPair;
 use fastcrypto::ed25519::Ed25519PublicKey;
 use fastcrypto::ed25519::Ed25519Signature;
@@ -6,11 +11,6 @@ use fastcrypto::Verifier;
 use sha2::Digest;
 use sha2::Sha256;
 use std::fmt::Debug;
-
-use crate::keypair::lsb_32;
-use crate::keypair::sign;
-use crate::keypair::AuthorID;
-use crate::keypair::SignedDigest;
 
 /// A lamport clock timestamp. Used to track document versions
 pub type SequenceNumber = u64;
@@ -28,11 +28,9 @@ pub enum PathSegment {
 
 pub fn print_path(path: Vec<PathSegment>) -> String {
     path.iter()
-        .map(|p| {
-            match p {
-                PathSegment::Field(s) => s.to_string(),
-                PathSegment::Index(i) => lsb_32(*i).to_string(),
-            }
+        .map(|p| match p {
+            PathSegment::Field(s) => s.to_string(),
+            PathSegment::Index(i) => lsb_32(*i).to_string(),
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -53,10 +51,10 @@ pub fn parse_field(path: Vec<PathSegment>) -> Option<String> {
 }
 
 /// Represents a single node in a CRDT
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Op<T>
 where
-    T: Clone,
+    T: Hashable + Clone,
 {
     // Main content of the operation
     // Pre-image of hash
@@ -90,7 +88,7 @@ where
 
 impl<T> Op<T>
 where
-    T: Clone + Hashable,
+    T: Hashable + Clone,
 {
     pub fn author(&self) -> AuthorID {
         self.author
@@ -98,6 +96,19 @@ where
 
     pub fn sequence_num(&self) -> SequenceNumber {
         self.seq
+    }
+
+    pub fn into<U: Hashable + Clone + TryFrom<T>>(self) -> Op<U> {
+        Op {
+            content: self.content.and_then(|c| c.try_into().ok()),
+            origin: self.origin,
+            author: self.author,
+            seq: self.seq,
+            path: self.path,
+            is_deleted: self.is_deleted,
+            id: self.id,
+            signed_digest: self.signed_digest,
+        }
     }
 
     pub fn new(

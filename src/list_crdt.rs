@@ -10,7 +10,7 @@ use std::{
 #[derive(Clone)]
 pub struct ListCRDT<'a, T>
 where
-    T: Clone + Hashable,
+    T: Hashable + Clone,
 {
     /// List of all the operations we know of
     pub(crate) ops: Vec<Op<T>>,
