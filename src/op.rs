@@ -1,4 +1,3 @@
-use crate::json_crdt::Value;
 use crate::keypair::lsb_32;
 use crate::keypair::sign;
 use crate::keypair::AuthorID;

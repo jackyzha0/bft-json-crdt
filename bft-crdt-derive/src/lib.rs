@@ -96,7 +96,7 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                 let expanded = quote! {
                     impl #impl_generics #crate_name::json_crdt::CRDT #ty_generics for #ident #ty_generics #where_clause {
                         type Inner = #crate_name::json_crdt::Value;
-                        type View = &#lt #ident #ty_generics;
+                        type View = #crate_name::json_crdt::Value;
 
                         fn apply(&mut self, op: #crate_name::op::Op<Self::Inner>) {
                             // tried to assign to a struct field directly, invalid
@@ -125,7 +125,9 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                         }
 
                         fn view(&#lt self) -> Self::View {
-                            self
+                            let mut view_map = std::collections::HashMap::new();
+                            #(view_map.insert(#ident_strings.to_string(), self.#ident_literals.view().into());)*
+                            #crate_name::json_crdt::Value::Object(view_map)
                         }
 
                         fn new(keypair: &#lt #crate_name::keypair::Ed25519KeyPair, path: Vec<#crate_name::op::PathSegment>) -> Self {
