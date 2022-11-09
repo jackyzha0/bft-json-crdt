@@ -1,11 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     keypair::AuthorID,
-    list_crdt::ListCRDT,
-    lww_crdt::LWWRegisterCRDT,
-    map_crdt::MapCRDT,
-    op::{Hashable, Op, PathSegment},
+    op::{Hashable, Op, OpID, PathSegment},
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
@@ -23,16 +20,42 @@ pub struct BaseCRDT<'a, T: CRDT<'a>> {
     id: AuthorID,
     keypair: &'a Ed25519KeyPair,
     doc: T,
+
+    /// In a real world scenario, this would be a hashgraph
+    delivered: HashSet<OpID>,
+    message_q: HashMap<OpID, Vec<Op<T::Inner>>>,
 }
 
+#[allow(dead_code)]
 impl<'a, T: CRDT<'a>> BaseCRDT<'a, T> {
-    #[allow(dead_code)]
     fn new(keypair: &'a Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
             id,
             keypair,
             doc: T::new(keypair, vec![]),
+            delivered: HashSet::new(),
+            message_q: HashMap::new(),
+        }
+    }
+
+    fn apply(&mut self, op: Op<T::Inner>) {
+        let op_id = op.id;
+        // we haven't seen causal dependency, queue it for later
+        if !self.delivered.contains(&op_id) {
+            self.message_q.entry(op.origin).or_default().push(op);
+            return;
+        }
+
+        // otherwise, we are good to deliver
+        self.doc.apply(op);
+
+        // apply all of its causal dependents if there are any
+        let dependent_queue = self.message_q.remove(&op_id);
+        if let Some(mut q) = dependent_queue {
+            for dependent in q.drain(..) {
+                self.apply(dependent);
+            }
         }
     }
 }
@@ -73,6 +96,7 @@ impl From<Value> for serde_json::Value {
 }
 
 impl Value {
+    #[allow(dead_code)]
     fn into_json(self) -> serde_json::Value {
         self.into()
     }
@@ -175,7 +199,7 @@ mod test {
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
-        op::print_path,
+        op::{print_path, ROOT_ID},
     };
 
     #[test]
@@ -268,13 +292,61 @@ mod test {
         base1.doc.apply(_2_c_1.into());
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!({
+                "a": 2.13,
+                "b": true,
+                "c": "abc"
+            })
+        )
     }
 
     #[test]
-    fn test_vec_ops() {}
+    fn test_vec_and_map_ops() {
+        #[add_path_field]
+        #[derive(Debug, Clone, CRDT)]
+        struct Test<'t> {
+            a: ListCRDT<'t, String>,
+        }
+
+        let kp1 = make_keypair();
+        let kp2 = make_keypair();
+        let mut base1 = BaseCRDT::<Test>::new(&kp1);
+        let mut base2 = BaseCRDT::<Test>::new(&kp2);
+
+        let _1a = base1.doc.a.insert(ROOT_ID, "a".to_string());
+        let _1b = base1.doc.a.insert(_1a.id, "b".to_string());
+        let _2c = base2.doc.a.insert(ROOT_ID, "c".to_string());
+        let _2d = base2.doc.a.insert(_1b.id, "d".to_string());
+
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!({
+                "a": ["a", "b"],
+            })
+        );
+
+        // as _1b hasn't been delivered to base2 yet
+        assert_eq!(
+            base2.doc.view().into_json(),
+            json!({
+                "a": ["c"],
+            })
+        );
+
+        base2.doc.apply(_1b.into());
+        base2.doc.apply(_1a.into());
+        base1.doc.apply(_2d.into());
+        base1.doc.apply(_2c.into());
+        assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
+    }
 
     #[test]
     fn test_map_ops() {}
+
+    #[test]
+    fn test_causal_field_dependency() {}
 
     #[test]
     fn test_nested_ops() {}
