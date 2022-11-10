@@ -144,7 +144,7 @@ where
 
 impl<T> From<Vec<T>> for Value
 where
-    T: Into<Value> + Hashable + Clone + Default,
+    T: Into<Value> + Hashable + Clone,
 {
     fn from(value: Vec<T>) -> Self {
         Value::Array(value.iter().map(|x| x.clone().into()).collect())
@@ -153,7 +153,7 @@ where
 
 impl<T> From<HashMap<String, T>> for Value
 where
-    T: Into<Value> + Hashable + Clone + Default,
+    T: Into<Value> + Hashable + Clone,
 {
     fn from(value: HashMap<String, T>) -> Self {
         Value::Object(
