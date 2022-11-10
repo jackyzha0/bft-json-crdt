@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     keypair::AuthorID,
-    op::{Hashable, Op, OpID, PathSegment}, lww_crdt::LWWRegisterCRDT, list_crdt::ListCRDT, map_crdt::MapCRDT,
+    op::{Hashable, Op, OpID, PathSegment, ROOT_ID}, lww_crdt::LWWRegisterCRDT, list_crdt::ListCRDT, map_crdt::MapCRDT,
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
@@ -168,93 +168,92 @@ where
 /// Both traits below are reflexive as From/Into are reflexive so these are too
 /// Equivalent to [`TryFrom`] except with [`Option`] instead of [`Result`].
 /// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
-pub trait FromWithKey<T>: Sized {
-    fn from_with_key(value: T, keypair: &Ed25519KeyPair) -> Option<Self>;
+pub trait CRDTTerminalFrom<'a, T>: Sized {
+    fn terminal_from(value: T, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<Self>;
 }
 
 /// Equivalent to [`TryInto`] except with [`Option`] instead of [`Result`].
 /// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
-pub trait IntoWithKey<T>: Sized {
-    fn into_with_key(self, keypair: &Ed25519KeyPair) -> Option<T>;
+pub trait IntoCRDTTerminal<'a, T>: Sized {
+    fn into_terminal(self, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<T>;
 }
 
 /// Equivalent to infallible conversions
-/// Automatically implement [`FromWithKey`] for anything that implements [`Into`]
-impl<T, U> FromWithKey<U> for T
+/// Automatically implement [`CRDTTerminalFrom`] for anything that implements [`Into`]
+impl<T, U> CRDTTerminalFrom<'_, U> for T
 where
     U: Into<T>,
 {
-    fn from_with_key(value: U, _keypair: &Ed25519KeyPair) -> Option<Self> {
+    fn terminal_from(value: U, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
         Some(U::into(value))
     }
 }
 
-/// FromWithKey implies IntoWithKey
-impl<T, U> IntoWithKey<U> for T
+/// CRDTTerminalFrom implies CRDTTerminalFrom
+impl<'a, T, U> IntoCRDTTerminal<'a, U> for T
 where
-    U: FromWithKey<T>,
+    U: CRDTTerminalFrom<'a, T>,
 {
-    fn into_with_key(self, keypair: &Ed25519KeyPair) -> Option<U> {
-        U::from_with_key(self, keypair)
+    fn into_terminal(self, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<U> {
+        U::terminal_from(self, keypair, path)
     }
 }
 
-impl TryFrom<Value> for bool {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
+impl CRDTTerminalFrom<'_, Value> for bool {
+    fn terminal_from(value: Value, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
         if let Value::Bool(x) = value {
-            Ok(x)
+            Some(x)
         } else {
-            Err(())
-        }
+            None
+        }  
     }
 }
 
-impl TryFrom<Value> for f64 {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
+impl CRDTTerminalFrom<'_, Value> for f64 {
+    fn terminal_from(value: Value, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
         if let Value::Number(x) = value {
-            Ok(x)
+            Some(x)
         } else {
-            Err(())
-        }
+            None
+        }  
     }
 }
 
-impl TryFrom<Value> for String {
-    type Error = ();
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
+impl CRDTTerminalFrom<'_, Value> for String {
+    fn terminal_from(value: Value, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
         if let Value::String(x) = value {
-            Ok(x)
+            Some(x)
         } else {
-            Err(())
+            None
+        }  
+    }
+}
+
+impl<'a, T> CRDTTerminalFrom<'a, Value> for LWWRegisterCRDT<'a, T> where T: CRDTTerminalFrom<'a, Value> + Clone + Hashable {
+    fn terminal_from(value: Value, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<Self> {
+        if let Some(term) = value.into_terminal(keypair, path.clone()) {
+            let mut crdt = LWWRegisterCRDT::new(keypair, path);
+            crdt.set(term);
+            Some(crdt)
+        } else {
+            None
         }
     }
 }
 
-// impl<'a, T> TryFrom<Value> for LWWRegisterCRDT<'a, T> where T: Into<T> + Hashable + Clone 
-// {
-//     type Error = ();
-//     fn try_from(value: Value) -> Result<Self, Self::Error> {
-//         todo!()
-//     }
-// }
-//
-// impl<'a, T> TryFrom<Value> for ListCRDT<'a, T> where T: From<Value> + Hashable + Clone 
-// {
-//     type Error = ();
-//     fn try_from(value: Value) -> Result<Self, Self::Error> {
-//         todo!()
-//     }
-// }
-//
-// impl<'a, T> TryFrom<Value> for MapCRDT<'a, T> where T: From<Value> + Hashable + Clone 
-// {
-//     type Error = ();
-//     fn try_from(value: Value) -> Result<Self, Self::Error> {
-//         todo!()
-//     }
-// }
+impl<'a, T> CRDTTerminalFrom<'a, Value> for ListCRDT<'a, T> where T: CRDTTerminalFrom<'a, Value> + Clone + Hashable {
+    fn terminal_from(value: Value, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<Self> {
+        if let Some(term) = value.into_terminal(keypair, path.clone()) {
+            let mut crdt = ListCRDT::new(keypair, path);
+            crdt.insert(ROOT_ID, term);
+            Some(crdt)
+        } else {
+            None
+        }
+    }
+}
+
+// todo, how does nesting work?
 
 #[cfg(test)]
 mod test {
@@ -262,7 +261,7 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        json_crdt::{BaseCRDT, CRDT},
+        json_crdt::{BaseCRDT, CRDT, IntoCRDTTerminal},
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
@@ -352,11 +351,11 @@ mod test {
             })
         );
 
-        base2.doc.apply(_1_a_1.into());
-        base2.doc.apply(_1_b_1.into());
-        base1.doc.apply(_2_a_1.into());
-        base1.doc.apply(_2_a_2.into());
-        base1.doc.apply(_2_c_1.into());
+        base2.doc.apply(_1_a_1.export());
+        base2.doc.apply(_1_b_1.export());
+        base1.doc.apply(_2_a_1.export());
+        base1.doc.apply(_2_a_2.export());
+        base1.doc.apply(_2_c_1.export());
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -402,10 +401,10 @@ mod test {
             })
         );
 
-        base2.doc.apply(_1b.into());
-        base2.doc.apply(_1a.into());
-        base1.doc.apply(_2d.into());
-        base1.doc.apply(_2c.into());
+        base2.doc.apply(_1b.export());
+        base2.doc.apply(_1a.export());
+        base1.doc.apply(_2d.export());
+        base1.doc.apply(_2c.export());
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }
 
@@ -426,6 +425,13 @@ mod test {
         }
 
         // require balance update to happen before inventory update
+        let kp1 = make_keypair();
+        let kp2 = make_keypair();
+        let mut base1 = BaseCRDT::<Player>::new(&kp1);
+        let mut base2 = BaseCRDT::<Player>::new(&kp2);
+
+        let _add_money = base1.doc.balance.set(5000.0);
+        let _spend_money = base1.doc.balance.set(3000.0);
     }
 
     #[test]

@@ -91,6 +91,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 let mut field_impls = vec![];
                 let mut ident_literals = vec![];
                 let mut ident_strings = vec![];
+                let mut tys = vec![];
                 for field in &fields.named {
                     let ident = field.ident.as_ref().expect("Failed to get struct field identifier");
                     if ident != "path" && ident != "keypair" {
@@ -101,6 +102,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         let str_literal = LitStr::new(&*ident.to_string(), ident.span());
                         ident_strings.push(str_literal.clone());
                         ident_literals.push(ident.clone());
+                        tys.push(ty.clone());
                         field_impls.push(quote! {
                             #ident: <#ty as CRDT>::new(
                                 keypair,
@@ -111,6 +113,20 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 }
 
                 let expanded = quote! {
+                    impl #impl_generics #crate_name::json_crdt::CRDTTerminalFrom<#lt, #crate_name::json_crdt::Value> for #ident #ty_generics #where_clause {
+                        fn terminal_from(value: #crate_name::json_crdt::Value, keypair: &#lt #crate_name::keypair::Ed25519KeyPair, path: Vec<#crate_name::op::PathSegment>) -> Option<Self> {
+                            // TODO: verify the second unwrap is actually infallible 
+                            if let #crate_name::json_crdt::Value::Object(mut obj) = value {
+                                Some(#ident {
+                                    path: path.clone(),
+                                    keypair,
+                                    #(#ident_literals: obj.remove(#ident_strings).unwrap().into_terminal(keypair, path.clone()).unwrap()),*
+                                })
+                            } else {
+                                None
+                            }  
+                        }
+                    } 
 
                     impl #impl_generics #crate_name::json_crdt::CRDT #ty_generics for #ident #ty_generics #where_clause {
                         type Inner = #crate_name::json_crdt::Value;
@@ -135,7 +151,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                             if let #crate_name::op::PathSegment::Field(path_seg) = &op.path[idx] {
                                 match &path_seg[..] {
                                     #(#ident_strings => {
-                                        self.#ident_literals.apply(op.into());
+                                        self.#ident_literals.apply(op.into(&self.keypair, self.path.clone()));
                                     }),*
                                     _ => {},
                                 };
