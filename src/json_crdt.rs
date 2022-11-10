@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     keypair::AuthorID,
-    op::{Hashable, Op, OpID, PathSegment, ROOT_ID}, lww_crdt::LWWRegisterCRDT, list_crdt::ListCRDT, map_crdt::MapCRDT,
+    list_crdt::ListCRDT,
+    lww_crdt::LWWRegisterCRDT,
+    map_crdt::MapCRDT,
+    op::{Hashable, Op, OpID, PathSegment, ROOT_ID},
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
@@ -95,6 +98,25 @@ impl From<Value> for serde_json::Value {
     }
 }
 
+impl From<serde_json::Value> for Value {
+    fn from(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Null => Value::Null,
+            serde_json::Value::Bool(x) => Value::Bool(x),
+            serde_json::Value::Number(x) => Value::Number(x.as_f64().unwrap()),
+            serde_json::Value::String(x) => Value::String(x),
+            serde_json::Value::Array(x) => {
+                Value::Array(x.iter().map(|a| a.clone().into()).collect())
+            }
+            serde_json::Value::Object(x) => Value::Object(
+                x.iter()
+                    .map(|(k, v)| (k.clone(), v.clone().into()))
+                    .collect(),
+            ),
+        }
+    }
+}
+
 impl Value {
     #[allow(dead_code)]
     fn into_json(self) -> serde_json::Value {
@@ -169,7 +191,8 @@ where
 /// Equivalent to [`TryFrom`] except with [`Option`] instead of [`Result`].
 /// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
 pub trait CRDTTerminalFrom<'a, T>: Sized {
-    fn terminal_from(value: T, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<Self>;
+    fn terminal_from(value: T, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>)
+        -> Option<Self>;
 }
 
 /// Equivalent to [`TryInto`] except with [`Option`] instead of [`Result`].
@@ -200,37 +223,56 @@ where
 }
 
 impl CRDTTerminalFrom<'_, Value> for bool {
-    fn terminal_from(value: Value, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
+    fn terminal_from(
+        value: Value,
+        _keypair: &Ed25519KeyPair,
+        _path: Vec<PathSegment>,
+    ) -> Option<Self> {
         if let Value::Bool(x) = value {
             Some(x)
         } else {
             None
-        }  
+        }
     }
 }
 
 impl CRDTTerminalFrom<'_, Value> for f64 {
-    fn terminal_from(value: Value, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
+    fn terminal_from(
+        value: Value,
+        _keypair: &Ed25519KeyPair,
+        _path: Vec<PathSegment>,
+    ) -> Option<Self> {
         if let Value::Number(x) = value {
             Some(x)
         } else {
             None
-        }  
+        }
     }
 }
 
 impl CRDTTerminalFrom<'_, Value> for String {
-    fn terminal_from(value: Value, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
+    fn terminal_from(
+        value: Value,
+        _keypair: &Ed25519KeyPair,
+        _path: Vec<PathSegment>,
+    ) -> Option<Self> {
         if let Value::String(x) = value {
             Some(x)
         } else {
             None
-        }  
+        }
     }
 }
 
-impl<'a, T> CRDTTerminalFrom<'a, Value> for LWWRegisterCRDT<'a, T> where T: CRDTTerminalFrom<'a, Value> + Clone + Hashable {
-    fn terminal_from(value: Value, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<Self> {
+impl<'a, T> CRDTTerminalFrom<'a, Value> for LWWRegisterCRDT<'a, T>
+where
+    T: CRDTTerminalFrom<'a, Value> + Clone + Hashable,
+{
+    fn terminal_from(
+        value: Value,
+        keypair: &'a Ed25519KeyPair,
+        path: Vec<PathSegment>,
+    ) -> Option<Self> {
         if let Some(term) = value.into_terminal(keypair, path.clone()) {
             let mut crdt = LWWRegisterCRDT::new(keypair, path);
             crdt.set(term);
@@ -241,8 +283,15 @@ impl<'a, T> CRDTTerminalFrom<'a, Value> for LWWRegisterCRDT<'a, T> where T: CRDT
     }
 }
 
-impl<'a, T> CRDTTerminalFrom<'a, Value> for ListCRDT<'a, T> where T: CRDTTerminalFrom<'a, Value> + Clone + Hashable {
-    fn terminal_from(value: Value, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<Self> {
+impl<'a, T> CRDTTerminalFrom<'a, Value> for ListCRDT<'a, T>
+where
+    T: CRDTTerminalFrom<'a, Value> + Clone + Hashable,
+{
+    fn terminal_from(
+        value: Value,
+        keypair: &'a Ed25519KeyPair,
+        path: Vec<PathSegment>,
+    ) -> Option<Self> {
         if let Some(term) = value.into_terminal(keypair, path.clone()) {
             let mut crdt = ListCRDT::new(keypair, path);
             crdt.insert(ROOT_ID, term);
@@ -261,11 +310,11 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        json_crdt::{BaseCRDT, CRDT, IntoCRDTTerminal},
+        json_crdt::{BaseCRDT, IntoCRDTTerminal, Value, CRDT},
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
-        op::{print_path, ROOT_ID},
+        op::{print_path, PathSegment, ROOT_ID},
     };
 
     #[test]
@@ -430,8 +479,36 @@ mod test {
         let mut base1 = BaseCRDT::<Player>::new(&kp1);
         let mut base2 = BaseCRDT::<Player>::new(&kp2);
 
+        // TODO:
+        // - add a cross-field dependency
+        // - make nested stuff easier to work with
+        // - make list api nicer to work with
+
         let _add_money = base1.doc.balance.set(5000.0);
         let _spend_money = base1.doc.balance.set(3000.0);
+        let sword: Value = json!({
+            "name": "Sword",
+            "soulbound": true,
+        })
+        .into();
+        let _new_inventory_item = base1.doc.inventory.insert(
+            ROOT_ID,
+            sword
+                .into_terminal(&kp1, vec![PathSegment::Field("inventory".to_string())])
+                .unwrap(),
+        );
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!({
+                "balance": 3000.0,
+                "inventory": [
+                    {
+                        "name": "Sword",
+                        "soulbound": true
+                    }
+                ]
+            })
+        );
     }
 
     #[test]

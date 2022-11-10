@@ -1,5 +1,5 @@
 use crate::json_crdt::CRDT;
-use crate::op::{Op, PathSegment, SequenceNumber, Hashable};
+use crate::op::{Op, PathSegment, SequenceNumber, Hashable, OpID};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
