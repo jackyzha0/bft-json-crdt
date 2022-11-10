@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     keypair::AuthorID,
-    op::{Hashable, Op, OpID, PathSegment},
+    op::{Hashable, Op, OpID, PathSegment}, lww_crdt::LWWRegisterCRDT, list_crdt::ListCRDT, map_crdt::MapCRDT,
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
@@ -11,7 +11,7 @@ pub trait CRDT<'t> {
     type Inner: Hashable + Clone + 't;
     type View;
     fn apply(&mut self, op: Op<Self::Inner>);
-    fn view(&'t self) -> Self::View;
+    fn view(&self) -> Self::View;
     fn new(keypair: &'t Ed25519KeyPair, path: Vec<PathSegment>) -> Self;
 }
 
@@ -133,6 +133,15 @@ where
     }
 }
 
+impl<'a, T> From<T> for Value
+where
+    T: CRDT<'a, Inner = Value, View = Value>,
+{
+    fn from(value: T) -> Self {
+        value.view()
+    }
+}
+
 impl<T> From<Vec<T>> for Value
 where
     T: Into<Value> + Hashable + Clone + Default,
@@ -189,9 +198,33 @@ impl TryFrom<Value> for String {
     }
 }
 
+// impl<'a, T> TryFrom<Value> for LWWRegisterCRDT<'a, T> where T: Into<T> + Hashable + Clone 
+// {
+//     type Error = ();
+//     fn try_from(value: Value) -> Result<Self, Self::Error> {
+//         todo!()
+//     }
+// }
+//
+// impl<'a, T> TryFrom<Value> for ListCRDT<'a, T> where T: From<Value> + Hashable + Clone 
+// {
+//     type Error = ();
+//     fn try_from(value: Value) -> Result<Self, Self::Error> {
+//         todo!()
+//     }
+// }
+//
+// impl<'a, T> TryFrom<Value> for MapCRDT<'a, T> where T: From<Value> + Hashable + Clone 
+// {
+//     type Error = ();
+//     fn try_from(value: Value) -> Result<Self, Self::Error> {
+//         todo!()
+//     }
+// }
+
 #[cfg(test)]
 mod test {
-    use bft_crdt_derive::add_path_field;
+    use bft_crdt_derive::add_crdt_fields;
     use serde_json::json;
 
     use crate::{
@@ -204,7 +237,7 @@ mod test {
 
     #[test]
     fn test_derive_basic() {
-        #[add_path_field]
+        #[add_crdt_fields]
         #[derive(Debug, Clone, CRDT)]
         struct Player<'t> {
             x: LWWRegisterCRDT<'t, f64>,
@@ -219,14 +252,14 @@ mod test {
 
     #[test]
     fn test_derive_nested() {
-        #[add_path_field]
+        #[add_crdt_fields]
         #[derive(Debug, Clone, CRDT)]
         struct Position<'t> {
             x: LWWRegisterCRDT<'t, f64>,
             y: LWWRegisterCRDT<'t, f64>,
         }
 
-        #[add_path_field]
+        #[add_crdt_fields]
         #[derive(Debug, Clone, CRDT)]
         struct Player<'t> {
             pos: Position<'t>,
@@ -244,7 +277,7 @@ mod test {
 
     #[test]
     fn test_lww_ops() {
-        #[add_path_field]
+        #[add_crdt_fields]
         #[derive(Debug, Clone, CRDT)]
         struct Test<'t> {
             a: LWWRegisterCRDT<'t, f64>,
@@ -304,7 +337,7 @@ mod test {
 
     #[test]
     fn test_vec_and_map_ops() {
-        #[add_path_field]
+        #[add_crdt_fields]
         #[derive(Debug, Clone, CRDT)]
         struct Test<'t> {
             a: ListCRDT<'t, String>,
@@ -343,10 +376,23 @@ mod test {
     }
 
     #[test]
-    fn test_map_ops() {}
+    fn test_causal_field_dependency() {
+        #[add_crdt_fields]
+        #[derive(Debug, Clone, CRDT)]
+        struct Item<'t> {
+            name: LWWRegisterCRDT<'t, String>,
+            soulbound: LWWRegisterCRDT<'t, bool>,
+        }
 
-    #[test]
-    fn test_causal_field_dependency() {}
+        #[add_crdt_fields]
+        #[derive(Debug, Clone, CRDT)]
+        struct Player<'t> {
+            inventory: ListCRDT<'t, Item<'t>>,
+            balance: LWWRegisterCRDT<'t, f64>,
+        }
+
+        // require balance update to happen before inventory update
+    }
 
     #[test]
     fn test_nested_ops() {}

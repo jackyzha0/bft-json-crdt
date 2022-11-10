@@ -6,7 +6,7 @@ use syn::{
     parse::{self, Parser},
     parse_macro_input,
     spanned::Spanned,
-    Data, DeriveInput, Field, Fields, GenericParam, ItemStruct, LitStr, Type,
+    Data, DeriveInput, Field, Fields, GenericParam, ItemStruct, Lifetime, LitStr, Type, Generics,
 };
 
 fn get_crate_name() -> TokenStream {
@@ -22,43 +22,16 @@ fn get_crate_name() -> TokenStream {
     }
 }
 
-#[proc_macro_attribute]
-pub fn add_path_field(args: OgTokenStream, input: OgTokenStream) -> OgTokenStream {
-    let mut item_struct = parse_macro_input!(input as ItemStruct);
-    let crate_name = get_crate_name();
-    let _ = parse_macro_input!(args as parse::Nothing);
 
-    if let syn::Fields::Named(ref mut fields) = item_struct.fields {
-        fields.named.push(
-            Field::parse_named
-                .parse2(quote! { path: Vec<#crate_name::op::PathSegment> })
-                .unwrap(),
-        );
-    }
-
-    return quote! {
-        #item_struct
-    }
-    .into();
-}
-
-#[proc_macro_derive(CRDT)]
-pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    // Parse the input tokens into a syntax tree.
-    let input = parse_macro_input!(input as DeriveInput);
-    let crate_name = get_crate_name();
-
-    // Used in the quasi-quotation below as `#name`.
-    let ident = input.ident;
-
+fn get_lifetime(input: &Generics) -> Option<Lifetime> {
     // ensure only one lifetime
     let mut lt = None;
     let mut num_lt = 0;
-    for param in &input.generics.params {
+    for param in &input.params {
         match param {
             GenericParam::Lifetime(lt_param) => {
                 if num_lt >= 1 {
-                    return quote_spanned! { lt_param.span() => compile_error!("A struct that derives CRDT can have at most one lifetime") }.into();
+                    return None
                 }
                 lt = Some(lt_param.lifetime.clone());
                 num_lt += 1;
@@ -66,6 +39,50 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
             _ => {}
         }
     }
+    lt
+}
+
+// creates a keypair and path var on a given struct
+#[proc_macro_attribute]
+pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStream {
+    let mut input = parse_macro_input!(input as ItemStruct);
+    let crate_name = get_crate_name();
+    let _ = parse_macro_input!(args as parse::Nothing);
+
+    let lt = if let Some(lt) = get_lifetime(&input.generics) { lt } else {
+        return quote_spanned! { input.generics.span() => compile_error!("A struct that derives CRDT can have at most one lifetime") }.into();
+    };
+
+    if let syn::Fields::Named(ref mut fields) = input.fields {
+        fields.named.push(
+            Field::parse_named
+                .parse2(quote! { path: Vec<#crate_name::op::PathSegment> })
+                .unwrap(),
+        );
+        fields.named.push(
+            Field::parse_named
+                .parse2(quote! { keypair: &#lt #crate_name::keypair::Ed25519KeyPair })
+                .unwrap(),
+        );
+    }
+
+    return quote! {
+        #input
+    }
+    .into();
+}
+
+#[proc_macro_derive(CRDT)]
+pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
+    // Parse the input tokens into a syntax tree.
+    let input = parse_macro_input!(input as DeriveInput);
+    let crate_name = get_crate_name();
+
+    // Used in the quasi-quotation below as `#name`.
+    let ident = input.ident;
+    let lt = if let Some(lt) = get_lifetime(&input.generics) { lt } else {
+        return quote_spanned! { input.generics.span() => compile_error!("A struct that derives CRDT can have at most one lifetime") }.into();
+    };
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     match input.data {
@@ -76,7 +93,7 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                 let mut ident_strings = vec![];
                 for field in &fields.named {
                     let ident = field.ident.as_ref().expect("Failed to get struct field identifier");
-                    if ident != "path" {
+                    if ident != "path" && ident != "keypair" {
                         let ty = match &field.ty {
                             Type::Path(t) => t.to_token_stream(),
                             _ => return quote_spanned! { field.span() => compile_error!("Field should be a primitive or struct which implements CRDT") }.into(),
@@ -94,6 +111,7 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                 }
 
                 let expanded = quote! {
+
                     impl #impl_generics #crate_name::json_crdt::CRDT #ty_generics for #ident #ty_generics #where_clause {
                         type Inner = #crate_name::json_crdt::Value;
                         type View = #crate_name::json_crdt::Value;
@@ -124,7 +142,7 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                             };
                         }
 
-                        fn view(&#lt self) -> Self::View {
+                        fn view(&self) -> Self::View {
                             let mut view_map = std::collections::HashMap::new();
                             #(view_map.insert(#ident_strings.to_string(), self.#ident_literals.view().into());)*
                             #crate_name::json_crdt::Value::Object(view_map)
@@ -133,6 +151,7 @@ pub fn derive_json_crdt(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                         fn new(keypair: &#lt #crate_name::keypair::Ed25519KeyPair, path: Vec<#crate_name::op::PathSegment>) -> Self {
                             Self {
                                 path: path.clone(),
+                                keypair,
                                 #(#field_impls),*
                             }
                         }
