@@ -165,6 +165,40 @@ where
     }
 }
 
+/// Both traits below are reflexive as From/Into are reflexive so these are too
+/// Equivalent to [`TryFrom`] except with [`Option`] instead of [`Result`].
+/// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
+pub trait FromWithKey<T>: Sized {
+    fn from_with_key(value: T, keypair: &Ed25519KeyPair) -> Option<Self>;
+}
+
+/// Equivalent to [`TryInto`] except with [`Option`] instead of [`Result`].
+/// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
+pub trait IntoWithKey<T>: Sized {
+    fn into_with_key(self, keypair: &Ed25519KeyPair) -> Option<T>;
+}
+
+/// Equivalent to infallible conversions
+/// Automatically implement [`FromWithKey`] for anything that implements [`Into`]
+impl<T, U> FromWithKey<U> for T
+where
+    U: Into<T>,
+{
+    fn from_with_key(value: U, _keypair: &Ed25519KeyPair) -> Option<Self> {
+        Some(U::into(value))
+    }
+}
+
+/// FromWithKey implies IntoWithKey
+impl<T, U> IntoWithKey<U> for T
+where
+    U: FromWithKey<T>,
+{
+    fn into_with_key(self, keypair: &Ed25519KeyPair) -> Option<U> {
+        U::from_with_key(self, keypair)
+    }
+}
+
 impl TryFrom<Value> for bool {
     type Error = ();
     fn try_from(value: Value) -> Result<Self, Self::Error> {
