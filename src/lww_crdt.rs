@@ -13,7 +13,7 @@ where
     T: Hashable + Clone,
 {
     pub our_id: AuthorID,
-    keypair: &'a Ed25519KeyPair,
+    pub(crate) keypair: &'a Ed25519KeyPair,
     pub path: Vec<PathSegment>,
     value: Op<T>,
     logical_clocks: HashMap<AuthorID, SequenceNumber>,

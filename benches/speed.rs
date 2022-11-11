@@ -10,7 +10,7 @@ use test::Bencher;
 fn bench_insert_1_000_root(b: &mut Bencher) {
     b.iter(|| {
         let key = make_keypair();
-        let mut list = ListCRDT::new(&key, vec![]);
+        let mut list = ListCRDT::<i32>::new(&key, vec![]);
         for i in 0..1_000 {
             list.insert(ROOT_ID, i);
         }
@@ -21,7 +21,7 @@ fn bench_insert_1_000_root(b: &mut Bencher) {
 fn bench_insert_1_000_linear(b: &mut Bencher) {
     b.iter(|| {
         let key = make_keypair();
-        let mut list = ListCRDT::new(&key, vec![]);
+        let mut list = ListCRDT::<i32>::new(&key, vec![]);
         let mut prev = ROOT_ID;
         for i in 0..1_000 {
             let op = list.insert(prev, i);
@@ -37,7 +37,7 @@ fn bench_insert_many_agents_conflicts(b: &mut Bencher) {
         let mut rng = rand::thread_rng();
         let mut keys: Vec<Ed25519KeyPair> = Vec::with_capacity(N);
         // generate all of our keys
-        (0..N).for_each(|i| keys[i] = make_keypair());
+        (0..N).for_each(|_| keys.push(make_keypair()));
 
         let mut crdts: Vec<ListCRDT<usize>> = Vec::with_capacity(N);
         let mut logs: Vec<Op<usize>> = Vec::new();

@@ -4,7 +4,6 @@ use crate::{
     keypair::AuthorID,
     list_crdt::ListCRDT,
     lww_crdt::LWWRegisterCRDT,
-    map_crdt::MapCRDT,
     op::{Hashable, Op, OpID, PathSegment, ROOT_ID},
 };
 pub use bft_crdt_derive::*;
@@ -145,7 +144,7 @@ impl From<String> for Value {
 
 impl<T> From<Option<T>> for Value
 where
-    T: Into<Value> + Hashable + Clone + Default,
+    T: Into<Value> + Hashable + Clone,
 {
     fn from(val: Option<T>) -> Self {
         match val {
@@ -161,6 +160,24 @@ where
 {
     fn from(value: T) -> Self {
         value.view()
+    }
+}
+
+impl<'a, T> From<ListCRDT<'a, T>> for Value
+where
+    T: Hashable + Clone + Into<Value>,
+{
+    fn from(value: ListCRDT<'a, T>) -> Self {
+        value.view().into()
+    }
+}
+
+impl<'a, T> From<LWWRegisterCRDT<'a, T>> for Value
+where
+    T: Hashable + Clone + Into<Value>,
+{
+    fn from(value: LWWRegisterCRDT<'a, T>) -> Self {
+        value.view().into()
     }
 }
 
@@ -294,15 +311,13 @@ where
     ) -> Option<Self> {
         if let Some(term) = value.into_terminal(keypair, path.clone()) {
             let mut crdt = ListCRDT::new(keypair, path);
-            crdt.insert(ROOT_ID, term);
+            crdt.insert::<Value>(ROOT_ID, term);
             Some(crdt)
         } else {
             None
         }
     }
 }
-
-// todo, how does nesting work?
 
 #[cfg(test)]
 mod test {
@@ -314,7 +329,7 @@ mod test {
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
-        op::{print_path, PathSegment, ROOT_ID},
+        op::{print_path, ROOT_ID},
     };
 
     #[test]
@@ -479,11 +494,6 @@ mod test {
         let mut base1 = BaseCRDT::<Player>::new(&kp1);
         let mut base2 = BaseCRDT::<Player>::new(&kp2);
 
-        // TODO:
-        // - add a cross-field dependency
-        // - make nested stuff easier to work with
-        // - make list api nicer to work with
-
         let _add_money = base1.doc.balance.set(5000.0);
         let _spend_money = base1.doc.balance.set(3000.0);
         let sword: Value = json!({
@@ -491,12 +501,7 @@ mod test {
             "soulbound": true,
         })
         .into();
-        let _new_inventory_item = base1.doc.inventory.insert(
-            ROOT_ID,
-            sword
-                .into_terminal(&kp1, vec![PathSegment::Field("inventory".to_string())])
-                .unwrap(),
-        );
+        let _new_inventory_item = base1.doc.inventory.insert_idx(0, sword);
         assert_eq!(
             base1.doc.view().into_json(),
             json!({
@@ -512,5 +517,29 @@ mod test {
     }
 
     #[test]
-    fn test_nested_ops() {}
+    fn test_2d_grid() {
+        #[add_crdt_fields]
+        #[derive(Debug, Clone, CRDT)]
+        struct Todo<'t> {
+            grid: ListCRDT<'t, ListCRDT<'t, LWWRegisterCRDT<'t, bool>>>,
+        }
+    }
+
+    #[test]
+    fn test_nested_ops() {
+        #[add_crdt_fields]
+        #[derive(Debug, Clone, CRDT)]
+        struct Todo<'t> {
+            name: LWWRegisterCRDT<'t, String>,
+            due: LWWRegisterCRDT<'t, String>,
+            done: LWWRegisterCRDT<'t, bool>,
+            tags: ListCRDT<'t, String>,
+        }
+
+        #[add_crdt_fields]
+        #[derive(Debug, Clone, CRDT)]
+        struct Schedule<'t> {
+            items: ListCRDT<'t, Todo<'t>>,
+        }
+    }
 }

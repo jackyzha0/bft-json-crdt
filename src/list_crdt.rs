@@ -1,10 +1,14 @@
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 
-use crate::{json_crdt::CRDT, keypair::AuthorID, op::*};
+use crate::{
+    json_crdt::{IntoCRDTTerminal, CRDT},
+    keypair::AuthorID,
+    op::*,
+};
 use std::{
     cmp::{max, Ordering},
     collections::HashMap,
-    fmt::Debug,
+    fmt::Debug, ops::{Index, IndexMut},
 };
 
 #[derive(Clone)]
@@ -17,7 +21,7 @@ where
 
     /// Public key for this node
     pub our_id: AuthorID,
-    keypair: &'a Ed25519KeyPair,
+    pub(crate) keypair: &'a Ed25519KeyPair,
 
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
@@ -33,7 +37,7 @@ where
     highest_seq: SequenceNumber,
 }
 
-impl<T> ListCRDT<'_, T>
+impl<'a, T> ListCRDT<'a, T>
 where
     T: Hashable + Clone,
 {
@@ -62,18 +66,43 @@ where
     }
 
     /// Locally insert some content causally after the given operation
-    pub fn insert(&mut self, after: OpID, content: T) -> Op<T> {
+    pub fn insert<U: IntoCRDTTerminal<'a, T> + Hashable + Clone>(
+        &mut self,
+        after: OpID,
+        content: U,
+    ) -> Op<T> {
+        let transmuted = content
+            .into_terminal(self.keypair, self.path.clone())
+            .unwrap();
         let op = Op::new(
             after,
             self.our_id,
             self.our_seq() + 1,
             false,
-            Some(content),
+            Some(transmuted),
             self.path.to_owned(),
             self.keypair,
         );
         self.apply(op.clone());
         op
+    }
+
+    /// Shorthand function to insert at index locally
+    pub fn insert_idx<U: IntoCRDTTerminal<'a, T> + Hashable + Clone>(
+        &mut self,
+        idx: usize,
+        content: U,
+    ) -> Op<T> {
+        let mut i = 0;
+        for op in &self.ops {
+            if !op.is_deleted {
+                if idx == i {
+                    return self.insert(op.id, content);
+                }
+                i += 1;
+            }
+        }
+        panic!("index {idx} out of range (length of {i})")
     }
 
     /// Mark a node as deleted. Will panic if the node doesn't exist
@@ -92,7 +121,7 @@ where
     }
 
     /// Find the idx of an operation with the given [`OpID`]
-    pub fn find(&self, id: OpID) -> Option<usize> {
+    pub fn find_idx(&self, id: OpID) -> Option<usize> {
         self.ops.iter().position(|op| op.id == id)
     }
 
@@ -108,7 +137,7 @@ where
         let op_id = op.id;
         let author = op.author();
         let seq = op.sequence_num();
-        let origin_id = self.find(op.origin);
+        let origin_id = self.find_idx(op.origin);
 
         // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin_id.is_none() {
@@ -146,7 +175,7 @@ where
     /// 2) find the right spot to insert before the next node
     fn integrate(&mut self, new_op: Op<T>) {
         // get index of the new op's origin
-        let new_op_parent_idx = self.find(new_op.origin).unwrap();
+        let new_op_parent_idx = self.find_idx(new_op.origin).unwrap();
 
         // if its a delete operation, we don't need to do much
         if new_op.is_deleted {
@@ -160,7 +189,7 @@ where
         let mut i = new_op_parent_idx + 1;
         while i < self.ops.len() {
             let op = &self.ops[i];
-            let op_parent_idx = self.find(op.origin).unwrap();
+            let op_parent_idx = self.find_idx(op.origin).unwrap();
 
             // idempotency
             if op.id == new_op.id {
@@ -225,6 +254,38 @@ where
     }
 }
 
+impl<'a, T> Index<usize> for ListCRDT<'a, T> where T: Hashable + Clone {
+    type Output = T;
+    fn index(&self, idx: usize) -> &Self::Output {
+        let mut i = 0;
+        for op in &self.ops {
+            if !op.is_deleted && op.content.is_some() {
+                if idx == i {
+                    return op.content.as_ref().unwrap();
+                }
+                i += 1;
+            }
+        }
+        panic!("index {idx} out of range (length of {i})")
+    }
+}
+
+impl<'a, T> IndexMut<usize> for ListCRDT<'a, T> where T: Hashable + Clone {
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        let mut i = 0;
+        for op in &mut self.ops {
+            if !op.is_deleted && op.content.is_some() {
+                if idx == i {
+                    return op.content.as_mut().unwrap();
+                }
+                i += 1;
+            }
+        }
+        panic!("index {idx} out of range (length of {i})")
+    }
+}
+
+
 impl<'t, T> CRDT<'t> for ListCRDT<'t, T>
 where
     T: Hashable + Clone + 't,
@@ -251,7 +312,7 @@ mod test {
     #[test]
     fn test_list_simple() {
         let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1, vec![]);
+        let mut list = ListCRDT::<i32>::new(&key1, vec![]);
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
@@ -262,7 +323,7 @@ mod test {
     #[test]
     fn test_list_idempotence() {
         let key = make_keypair();
-        let mut list = ListCRDT::new(&key, vec![]);
+        let mut list = ListCRDT::<i32>::new(&key, vec![]);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
             list.apply(op.clone());
@@ -273,7 +334,7 @@ mod test {
     #[test]
     fn test_list_delete() {
         let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1, vec![]);
+        let mut list = ListCRDT::<char>::new(&key1, vec![]);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -285,7 +346,7 @@ mod test {
     #[test]
     fn test_list_interweave_chars() {
         let key1 = make_keypair();
-        let mut list = ListCRDT::new(&key1, vec![]);
+        let mut list = ListCRDT::<char>::new(&key1, vec![]);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -296,7 +357,7 @@ mod test {
     fn test_list_conflicting_agents() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut list1 = ListCRDT::new(&key1, vec![]);
+        let mut list1 = ListCRDT::<char>::new(&key1, vec![]);
         let mut list2 = ListCRDT::new(&key2, vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a.clone());
@@ -320,7 +381,7 @@ mod test {
     fn test_list_delete_multiple_agent() {
         let key1 = make_keypair();
         let key2 = make_keypair();
-        let mut list1 = ListCRDT::new(&key1, vec![]);
+        let mut list1 = ListCRDT::<char>::new(&key1, vec![]);
         let mut list2 = ListCRDT::new(&key2, vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
         list2.apply(_1_a.clone());
@@ -336,7 +397,7 @@ mod test {
     #[test]
     fn test_list_nested() {
         let key1 = make_keypair();
-        let mut list1 = ListCRDT::new(&key1, vec![]);
+        let mut list1 = ListCRDT::<char>::new(&key1, vec![]);
         let _c = list1.insert(ROOT_ID, 'c');
         let _a = list1.insert(ROOT_ID, 'a');
         let _d = list1.insert(_c.id, 'd');

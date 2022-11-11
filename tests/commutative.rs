@@ -1,7 +1,6 @@
 use bft_json_crdt::{
     keypair::make_keypair,
     list_crdt::ListCRDT,
-    map_crdt::MapCRDT,
     op::{Op, OpID, ROOT_ID, Hashable},
 };
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
@@ -94,56 +93,3 @@ fn test_list_fuzz_commutative() {
     assert_eq!(l2_doc, chk_doc);
 }
 
-#[test]
-fn test_map_fuzz_commutative() {
-    let mut rng = rand::thread_rng();
-    let mut op_log1 = Vec::<Op<char>>::new();
-    let mut op_log2 = Vec::<Op<char>>::new();
-    let key1 = make_keypair();
-    let key2 = make_keypair();
-    let keychk = make_keypair();
-    let mut l1 = MapCRDT::<char>::new(&key1, vec![]);
-    let mut l2 = MapCRDT::<char>::new(&key2, vec![]);
-    let mut chk = MapCRDT::<char>::new(&keychk, vec![]);
-    let keys = vec!["abc", "123", "test", "cool", "and", "good"];
-    for _ in 0..TEST_N {
-        let letter1: char = rng.gen_range(b'a'..=b'z') as char;
-        let letter2: char = rng.gen_range(b'a'..=b'z') as char;
-        let key1 = keys.choose(&mut rng).unwrap().to_string();
-        let key2 = keys.choose(&mut rng).unwrap().to_string();
-        let op1 = if rng.gen_bool(4.0 / 5.0) {
-            l1.set(key1, letter1)
-        } else {
-            l1.delete(random_op(&op_log1, &mut rng))
-        };
-        let op2 = if rng.gen_bool(4.0 / 5.0) {
-            l2.set(key2, letter2)
-        } else {
-            l2.delete(random_op(&op_log2, &mut rng))
-        };
-        op_log1.push(op1);
-        op_log2.push(op2);
-    }
-
-    // shuffle ops
-    op_log1.shuffle(&mut rng);
-    op_log2.shuffle(&mut rng);
-
-    // apply to each other
-    for op in op_log1 {
-        l2.apply(op.clone());
-        chk.apply(op);
-    }
-    for op in op_log2 {
-        l1.apply(op.clone());
-        chk.apply(op);
-    }
-
-    // ensure all equal
-    let l1_doc = l1.view();
-    let l2_doc = l2.view();
-    let chk_doc = chk.view();
-    assert_eq!(l1_doc, l2_doc);
-    assert_eq!(l1_doc, chk_doc);
-    assert_eq!(l2_doc, chk_doc);
-}
