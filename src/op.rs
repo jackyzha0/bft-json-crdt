@@ -1,5 +1,5 @@
+use crate::json_crdt::{Value, JSONOp};
 use crate::json_crdt::{CRDTTerminalFrom, IntoCRDTTerminal};
-use crate::json_crdt::Value;
 use crate::keypair::lsb_32;
 use crate::keypair::sign;
 use crate::keypair::AuthorID;
@@ -87,20 +87,14 @@ where
     }
 }
 
-impl<T> Op<T> where T: Hashable + Clone + Into<Value> {
+
+impl<T> Op<T>
+where
+    T: Hashable + Clone + Into<Value>,
+{
     /// Exports a specific op to be JSON generic
-    /// Ready for transport!
-    pub fn export(self) -> Op<Value> {
-        Op {
-            content: self.content.map(|c| c.into()),
-            origin: self.origin,
-            author: self.author,
-            seq: self.seq,
-            path: self.path,
-            is_deleted: self.is_deleted,
-            id: self.id,
-            signed_digest: self.signed_digest,
-        }
+    pub fn export(self) -> JSONOp {
+        JSONOp::from(self)
     }
 }
 
@@ -115,8 +109,12 @@ where
     pub fn sequence_num(&self) -> SequenceNumber {
         self.seq
     }
-    
-    pub fn into<'a, U: Hashable + Clone + CRDTTerminalFrom<'a, T>>(self, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Op<U> {
+
+    pub fn into<'a, U: Hashable + Clone + CRDTTerminalFrom<'a, T>>(
+        self,
+        keypair: &'a Ed25519KeyPair,
+        path: Vec<PathSegment>,
+    ) -> Op<U> {
         Op {
             content: self.content.and_then(|c| c.into_terminal(keypair, path)),
             origin: self.origin,

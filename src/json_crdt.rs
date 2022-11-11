@@ -28,8 +28,43 @@ pub struct BaseCRDT<'a, T: CRDT<'a>> {
     message_q: HashMap<OpID, Vec<Op<T::Inner>>>,
 }
 
+pub struct JSONOp {
+    inner: Op<Value>,
+    origin: Option<OpID>,
+}
+
+impl JSONOp {
+    fn depends_on(self, origin: OpID) -> Self {
+        Self {
+            origin: Some(origin),
+            ..self
+        }
+    }
+}
+
+impl<T> From<Op<T>> for JSONOp
+where
+    T: Hashable + Clone + Into<Value>,
+{
+    fn from(value: Op<T>) -> Self {
+        Self {
+            inner: Op {
+                content: value.content.map(|c| c.into()),
+                origin: value.origin,
+                author: value.author,
+                seq: value.seq,
+                path: value.path,
+                is_deleted: value.is_deleted,
+                id: value.id,
+                signed_digest: value.signed_digest,
+            },
+            origin: None,
+        }
+    }
+}
+
 #[allow(dead_code)]
-impl<'a, T: CRDT<'a>> BaseCRDT<'a, T> {
+impl<'a, T: CRDT<'a, Inner = Value>> BaseCRDT<'a, T> {
     fn new(keypair: &'a Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
@@ -41,22 +76,31 @@ impl<'a, T: CRDT<'a>> BaseCRDT<'a, T> {
         }
     }
 
-    fn apply(&mut self, op: Op<T::Inner>) {
-        let op_id = op.id;
+    fn apply(&mut self, op: JSONOp) {
+        if op.origin.is_none() {
+            self.doc.apply(op.inner);
+            return;
+        }
+
+        let op_id = op.inner.id;
+        let origin = op.origin.unwrap();
         // we haven't seen causal dependency, queue it for later
-        if !self.delivered.contains(&op_id) {
-            self.message_q.entry(op.origin).or_default().push(op);
+        if !self.delivered.contains(&origin) {
+            self.message_q.entry(origin).or_default().push(op.inner);
             return;
         }
 
         // otherwise, we are good to deliver
-        self.doc.apply(op);
+        self.doc.apply(op.inner);
 
         // apply all of its causal dependents if there are any
         let dependent_queue = self.message_q.remove(&op_id);
         if let Some(mut q) = dependent_queue {
             for dependent in q.drain(..) {
-                self.apply(dependent);
+                self.apply(JSONOp {
+                    inner: dependent,
+                    origin: None,
+                });
             }
         }
     }
@@ -415,11 +459,11 @@ mod test {
             })
         );
 
-        base2.doc.apply(_1_a_1.export());
-        base2.doc.apply(_1_b_1.export());
-        base1.doc.apply(_2_a_1.export());
-        base1.doc.apply(_2_a_2.export());
-        base1.doc.apply(_2_c_1.export());
+        base2.apply(_1_a_1.export());
+        base2.apply(_1_b_1.export());
+        base1.apply(_2_a_1.export());
+        base1.apply(_2_a_2.export());
+        base1.apply(_2_c_1.export());
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -465,10 +509,10 @@ mod test {
             })
         );
 
-        base2.doc.apply(_1b.export());
-        base2.doc.apply(_1a.export());
-        base1.doc.apply(_2d.export());
-        base1.doc.apply(_2c.export());
+        base2.apply(_1b.export());
+        base2.apply(_1a.export());
+        base1.apply(_2d.export());
+        base1.apply(_2c.export());
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }
 
