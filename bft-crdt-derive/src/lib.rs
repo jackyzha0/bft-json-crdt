@@ -6,40 +6,19 @@ use syn::{
     parse::{self, Parser},
     parse_macro_input,
     spanned::Spanned,
-    Data, DeriveInput, Field, Fields, GenericParam, ItemStruct, Lifetime, LitStr, Type, Generics,
+    Data, DeriveInput, Field, Fields, ItemStruct, LitStr, Type
 };
 
 fn get_crate_name() -> TokenStream {
-    let cr8 = crate_name("bft_json_crdt")
-        .ok()
+    let cr8 = crate_name("bft-json-crdt")
         .unwrap_or(FoundCrate::Itself);
     match cr8 {
-        FoundCrate::Itself => quote! { crate },
+        FoundCrate::Itself => quote! { ::bft_json_crdt },
         FoundCrate::Name(name) => {
             let ident = Ident::new(&name, Span::call_site());
-            quote! { #ident }
+            quote! { ::#ident }
         }
     }
-}
-
-
-fn get_lifetime(input: &Generics) -> Option<Lifetime> {
-    // ensure only one lifetime
-    let mut lt = None;
-    let mut num_lt = 0;
-    for param in &input.params {
-        match param {
-            GenericParam::Lifetime(lt_param) => {
-                if num_lt >= 1 {
-                    return None
-                }
-                lt = Some(lt_param.lifetime.clone());
-                num_lt += 1;
-            }
-            _ => {}
-        }
-    }
-    lt
 }
 
 // creates a keypair and path var on a given struct
@@ -49,10 +28,6 @@ pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStre
     let crate_name = get_crate_name();
     let _ = parse_macro_input!(args as parse::Nothing);
 
-    let lt = if let Some(lt) = get_lifetime(&input.generics) { lt } else {
-        return quote_spanned! { input.generics.span() => compile_error!("A struct that derives CRDT can have at most one lifetime") }.into();
-    };
-
     if let syn::Fields::Named(ref mut fields) = input.fields {
         fields.named.push(
             Field::parse_named
@@ -61,7 +36,7 @@ pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStre
         );
         fields.named.push(
             Field::parse_named
-                .parse2(quote! { keypair: &#lt #crate_name::keypair::Ed25519KeyPair })
+                .parse2(quote! { id: #crate_name::keypair::AuthorID })
                 .unwrap(),
         );
     }
@@ -80,9 +55,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
 
     // Used in the quasi-quotation below as `#name`.
     let ident = input.ident;
-    let lt = if let Some(lt) = get_lifetime(&input.generics) { lt } else {
-        return quote_spanned! { input.generics.span() => compile_error!("A struct that derives CRDT can have at most one lifetime") }.into();
-    };
+    let ident_str = LitStr::new(&*ident.to_string(), ident.span());
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     match input.data {
@@ -94,7 +67,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 let mut tys = vec![];
                 for field in &fields.named {
                     let ident = field.ident.as_ref().expect("Failed to get struct field identifier");
-                    if ident != "path" && ident != "keypair" {
+                    if ident != "path" && ident != "id" {
                         let ty = match &field.ty {
                             Type::Path(t) => t.to_token_stream(),
                             _ => return quote_spanned! { field.span() => compile_error!("Field should be a primitive or struct which implements CRDT") }.into(),
@@ -105,7 +78,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         tys.push(ty.clone());
                         field_impls.push(quote! {
                             #ident: <#ty as CRDT>::new(
-                                keypair,
+                                id,
                                 #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#str_literal.to_string()))
                             )
                         });
@@ -113,28 +86,43 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 }
 
                 let expanded = quote! {
-                    impl #impl_generics #crate_name::json_crdt::CRDTTerminalFrom<#lt, #crate_name::json_crdt::Value> for #ident #ty_generics #where_clause {
-                        fn terminal_from(value: #crate_name::json_crdt::Value, keypair: &#lt #crate_name::keypair::Ed25519KeyPair, path: Vec<#crate_name::op::PathSegment>) -> Option<Self> {
-                            // TODO: verify the second unwrap is actually infallible 
+                    impl #impl_generics #crate_name::json_crdt::CRDTTerminalFrom<#crate_name::json_crdt::Value> for #ident #ty_generics #where_clause {
+                        fn terminal_from(value: #crate_name::json_crdt::Value, id: #crate_name::keypair::AuthorID, path: Vec<#crate_name::op::PathSegment>) -> Result<Self, String> {
                             if let #crate_name::json_crdt::Value::Object(mut obj) = value {
-                                Some(#ident {
+                                Ok(#ident {
                                     path: path.clone(),
-                                    keypair,
-                                    #(#ident_literals: obj.remove(#ident_strings).unwrap().into_terminal(keypair, path.clone()).unwrap()),*
+                                    id,
+                                    #(#ident_literals: obj.remove(#ident_strings)
+                                        .unwrap()
+                                        .into_terminal(
+                                            id,
+                                            #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#ident_strings.to_string()))
+                                        )
+                                        .unwrap()
+                                    ),*
                                 })
                             } else {
-                                None
+                                Err(format!("failed to convert {:?} -> {}<T>", value, #ident_str.to_string()))
                             }  
+                        }
+                    }
+
+                    impl #impl_generics std::fmt::Debug for #ident #ty_generics #where_clause {
+                        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                            let mut fields = Vec::new();
+                            #(fields.push(format!("{}", #ident_strings.to_string()));)*
+                            write!(f, "{{ {:?} }}", fields.join(", "))
                         }
                     } 
 
-                    impl #impl_generics #crate_name::json_crdt::CRDT #ty_generics for #ident #ty_generics #where_clause {
+                    impl #impl_generics #crate_name::json_crdt::CRDT for #ident #ty_generics #where_clause {
                         type Inner = #crate_name::json_crdt::Value;
                         type View = #crate_name::json_crdt::Value;
 
                         fn apply(&mut self, op: #crate_name::op::Op<Self::Inner>) {
                             // tried to assign to a struct field directly, invalid
-                            if self.path.len() >= op.path.len() {
+                            let path = op.path.clone();
+                            if self.path.len() >= path.len() {
                                 return;
                             }
 
@@ -151,7 +139,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                             if let #crate_name::op::PathSegment::Field(path_seg) = &op.path[idx] {
                                 match &path_seg[..] {
                                     #(#ident_strings => {
-                                        self.#ident_literals.apply(op.into(&self.keypair, self.path.clone()));
+                                        self.#ident_literals.apply(op.into(self.id, path));
                                     }),*
                                     _ => {},
                                 };
@@ -164,10 +152,10 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                             #crate_name::json_crdt::Value::Object(view_map)
                         }
 
-                        fn new(keypair: &#lt #crate_name::keypair::Ed25519KeyPair, path: Vec<#crate_name::op::PathSegment>) -> Self {
+                        fn new(id: #crate_name::keypair::AuthorID, path: Vec<#crate_name::op::PathSegment>) -> Self {
                             Self {
                                 path: path.clone(),
-                                keypair,
+                                id,
                                 #(#field_impls),*
                             }
                         }

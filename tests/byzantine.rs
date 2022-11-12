@@ -1,5 +1,6 @@
 use bft_json_crdt::{
-    keypair::{make_keypair, sign},
+    json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTTerminal, CRDT},
+    keypair::make_keypair,
     list_crdt::ListCRDT,
     op::{Op, ROOT_ID},
 };
@@ -16,32 +17,34 @@ use bft_json_crdt::{
 //      also untestested! currently i keep an unbounded message queue
 // 5. block actual messages from honest actors (eclipse attack)
 
+#[add_crdt_fields]
+#[derive(Clone, CRDT)]
+struct ListExample {
+    list: ListCRDT<char>,
+}
+
 // case 2a + 2b
 #[test]
 fn test_equivocation() {
     let key = make_keypair();
-    let mut list = ListCRDT::<char>::new(&key, vec![]);
-    let _a = list.insert(ROOT_ID, 'a');
-    let _b = list.insert(_a.id, 'b');
+    let mut crdt = BaseCRDT::<ListExample>::new(&key);
+    let _a = crdt.doc.list.insert(ROOT_ID, 'a').sign(&key);
+    let _b = crdt.doc.list.insert(_a.id(), 'b').sign(&key);
 
     // make a fake operation with same id as _b
-    let fake_op = Op {
-        content: Some('c'),
-        .._b.clone()
-    };
+    let mut fake_op = _b.clone();
+    fake_op.inner.content = Some('c'.into());
 
     // also try modifying the sequence number
-    let fake_op_seq = Op {
-        seq: 99,
-        is_deleted: true,
-        .._b
-    };
+    let mut fake_op_seq = _b;
+    fake_op_seq.inner.seq = 99;
+    fake_op_seq.inner.is_deleted = true;
 
-    list.apply(fake_op);
-    list.apply(fake_op_seq);
+    crdt.apply(fake_op);
+    crdt.apply(fake_op_seq);
 
     // make sure it doesnt accept either of the fake operations
-    assert_eq!(list.view(), vec!['a', 'b']);
+    assert_eq!(crdt.doc.list.view(), vec!['a', 'b']);
 }
 
 // case 2c
@@ -50,28 +53,27 @@ fn test_forge_update() {
     // this implicity generates its own keypair
     // its public key is stored as list.our_id
     let key = make_keypair();
-    let mut list = ListCRDT::<char>::new(&key, vec![]);
-    let _a = list.insert(ROOT_ID, 'a');
+    let mut crdt = BaseCRDT::<ListExample>::new(&key);
+    let _a = crdt.doc.list.insert(ROOT_ID, 'a');
 
     let keypair = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id
     let mut op = Op {
         origin: _a.id,
-        author: list.our_id, // pretend to be the owner of list
+        author: crdt.doc.list.our_id, // pretend to be the owner of list
         content: Some('b'),
         path: vec![],
         seq: 1,
         is_deleted: false,
-        id: ROOT_ID,              // placeholder, to be generated
-        signed_digest: [0u8; 64], // placeholder, to be generated
+        id: ROOT_ID, // placeholder, to be generated
     };
 
     // this is a completely valid hash and digest, just signed by the wrong person
     // as keypair.public != list.public
-    op.id = op.hash(); // we can't tell from op.hash() alone whether this op is valid or not
-    op.signed_digest = sign(&keypair, &op.id).sig.to_bytes();
+    op.id = op.hash_to_id(); // we can't tell from op.hash() alone whether this op is valid or not
+    let signed = op.sign(&keypair);
 
-    list.apply(op);
+    crdt.apply(signed);
 
     // make sure it doesnt accept fake operation
-    assert_eq!(list.view(), vec!['a']);
+    assert_eq!(crdt.doc.list.view(), vec!['a']);
 }

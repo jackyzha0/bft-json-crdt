@@ -1,53 +1,97 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    keypair::AuthorID,
+    keypair::{sha256, sign, AuthorID, SignedDigest},
     list_crdt::ListCRDT,
     lww_crdt::LWWRegisterCRDT,
-    op::{Hashable, Op, OpID, PathSegment, ROOT_ID},
+    op::{print_hex, print_path, Hashable, Op, OpID, PathSegment},
 };
 pub use bft_crdt_derive::*;
-use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
+use fastcrypto::{
+    ed25519::{Ed25519KeyPair, Ed25519PublicKey, Ed25519Signature},
+    traits::{KeyPair, ToFromBytes},
+    Verifier,
+};
 
-pub trait CRDT<'t> {
-    type Inner: Hashable + Clone + 't;
+pub trait CRDT {
+    type Inner: Hashable + Clone;
     type View;
     fn apply(&mut self, op: Op<Self::Inner>);
     fn view(&self) -> Self::View;
-    fn new(keypair: &'t Ed25519KeyPair, path: Vec<PathSegment>) -> Self;
+    fn new(id: AuthorID, path: Vec<PathSegment>) -> Self;
 }
 
 #[allow(dead_code)]
-pub struct BaseCRDT<'a, T: CRDT<'a>> {
-    id: AuthorID,
+pub struct BaseCRDT<'a, T: CRDT> {
+    pub id: AuthorID,
     keypair: &'a Ed25519KeyPair,
-    doc: T,
+    pub doc: T,
 
     /// In a real world scenario, this would be a hashgraph
-    delivered: HashSet<OpID>,
-    message_q: HashMap<OpID, Vec<Op<T::Inner>>>,
+    received: HashSet<SignedDigest>,
+    message_q: HashMap<SignedDigest, Vec<SignedOp>>,
 }
 
-pub struct JSONOp {
-    inner: Op<Value>,
-    origin: Option<OpID>,
+#[derive(Clone)]
+pub struct SignedOp {
+    /// Effectively [`OpID`] Use this as the ID to figure out what has been delivered already
+    pub signed_digest: SignedDigest, // signed hash using priv key of author
+    pub inner: Op<Value>,
+    pub depends_on: Vec<SignedDigest>,
 }
 
-impl JSONOp {
-    fn depends_on(self, origin: OpID) -> Self {
-        Self {
-            origin: Some(origin),
-            ..self
+#[allow(dead_code)]
+impl SignedOp {
+    pub fn id(&self) -> OpID {
+        self.inner.id
+    }
+
+    fn author(&self) -> AuthorID {
+        self.inner.author()
+    }
+
+    /// Creates a digest of the following fields. Any changes in the fields will change the signed digest
+    ///  - id (hash of the following)
+    ///    - origin
+    ///    - author
+    ///    - seq
+    ///    - is_deleted
+    ///  - path
+    ///  - dependencies
+    fn digest(&self) -> [u8; 32] {
+        let path_string = print_path(self.inner.path.clone());
+        let dependency_string = self
+            .depends_on
+            .iter()
+            .map(print_hex)
+            .collect::<Vec<_>>()
+            .join("");
+        let fmt_str = format!("{:?},{path_string},{dependency_string}", self.id());
+        sha256(fmt_str)
+    }
+
+    fn sign_digest(&mut self, keypair: &Ed25519KeyPair) {
+        self.signed_digest = sign(keypair, &self.digest()).sig.to_bytes()
+    }
+
+    /// Ensure digest was actually signed by the author it claims to be signed by
+    fn is_valid_digest(&self) -> bool {
+        let digest = Ed25519Signature::from_bytes(&self.signed_digest);
+        let pubkey = Ed25519PublicKey::from_bytes(&self.author());
+        match (digest, pubkey) {
+            (Ok(digest), Ok(pubkey)) => pubkey.verify(&self.digest(), &digest).is_ok(),
+            (_, _) => false,
         }
     }
 }
 
-impl<T> From<Op<T>> for JSONOp
-where
-    T: Hashable + Clone + Into<Value>,
-{
-    fn from(value: Op<T>) -> Self {
-        Self {
+impl SignedOp {
+    pub fn from_op<T: Hashable + Clone + Into<Value>>(
+        value: Op<T>,
+        keypair: &Ed25519KeyPair,
+        depends_on: Vec<SignedDigest>,
+    ) -> Self {
+        let mut new = Self {
             inner: Op {
                 content: value.content.map(|c| c.into()),
                 origin: value.origin,
@@ -56,51 +100,53 @@ where
                 path: value.path,
                 is_deleted: value.is_deleted,
                 id: value.id,
-                signed_digest: value.signed_digest,
             },
-            origin: None,
-        }
+            signed_digest: [0u8; 64],
+            depends_on,
+        };
+        new.sign_digest(keypair);
+        new
     }
 }
 
 #[allow(dead_code)]
-impl<'a, T: CRDT<'a, Inner = Value>> BaseCRDT<'a, T> {
-    fn new(keypair: &'a Ed25519KeyPair) -> Self {
+impl<'a, T: CRDT<Inner = Value>> BaseCRDT<'a, T> {
+    pub fn new(keypair: &'a Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
             id,
             keypair,
-            doc: T::new(keypair, vec![]),
-            delivered: HashSet::new(),
+            doc: T::new(id, vec![]),
+            received: HashSet::new(),
             message_q: HashMap::new(),
         }
     }
 
-    fn apply(&mut self, op: JSONOp) {
-        if op.origin.is_none() {
-            self.doc.apply(op.inner);
+    pub fn apply(&mut self, op: SignedOp) {
+        #[cfg(feature = "bft")]
+        if !op.is_valid_digest() {
+            println!("invalid digest");
             return;
         }
 
-        let op_id = op.inner.id;
-        let origin = op.origin.unwrap();
-        // we haven't seen causal dependency, queue it for later
-        if !self.delivered.contains(&origin) {
-            self.message_q.entry(origin).or_default().push(op.inner);
-            return;
+        let op_id = op.signed_digest;
+        if !op.depends_on.is_empty() {
+            for origin in &op.depends_on {
+                if !self.received.contains(origin) {
+                    self.message_q.entry(*origin).or_default().push(op);
+                    return;
+                }
+            }
         }
-
-        // otherwise, we are good to deliver
-        self.doc.apply(op.inner);
 
         // apply all of its causal dependents if there are any
+        println!("applying path: {}", print_path(op.inner.path.clone()));
+        self.doc.apply(op.inner);
+        self.received.insert(op_id);
         let dependent_queue = self.message_q.remove(&op_id);
         if let Some(mut q) = dependent_queue {
             for dependent in q.drain(..) {
-                self.apply(JSONOp {
-                    inner: dependent,
-                    origin: None,
-                });
+                self.apply(dependent);
             }
         }
     }
@@ -186,6 +232,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<char> for Value {
+    fn from(val: char) -> Self {
+        Value::String(val.into())
+    }
+}
+
 impl<T> From<Option<T>> for Value
 where
     T: Into<Value> + Hashable + Clone,
@@ -198,29 +250,29 @@ where
     }
 }
 
-impl<'a, T> From<T> for Value
+impl<T> From<T> for Value
 where
-    T: CRDT<'a, Inner = Value, View = Value>,
+    T: CRDT<Inner = Value, View = Value>,
 {
     fn from(value: T) -> Self {
         value.view()
     }
 }
 
-impl<'a, T> From<ListCRDT<'a, T>> for Value
+impl<T> From<ListCRDT<T>> for Value
 where
     T: Hashable + Clone + Into<Value>,
 {
-    fn from(value: ListCRDT<'a, T>) -> Self {
+    fn from(value: ListCRDT<T>) -> Self {
         value.view().into()
     }
 }
 
-impl<'a, T> From<LWWRegisterCRDT<'a, T>> for Value
+impl<T> From<LWWRegisterCRDT<T>> for Value
 where
     T: Hashable + Clone + Into<Value>,
 {
-    fn from(value: LWWRegisterCRDT<'a, T>) -> Self {
+    fn from(value: LWWRegisterCRDT<T>) -> Self {
         value.view().into()
     }
 }
@@ -251,125 +303,118 @@ where
 /// Both traits below are reflexive as From/Into are reflexive so these are too
 /// Equivalent to [`TryFrom`] except with [`Option`] instead of [`Result`].
 /// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
-pub trait CRDTTerminalFrom<'a, T>: Sized {
-    fn terminal_from(value: T, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>)
-        -> Option<Self>;
+pub trait CRDTTerminalFrom<T>: Sized {
+    fn terminal_from(value: T, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String>;
 }
 
 /// Equivalent to [`TryInto`] except with [`Option`] instead of [`Result`].
 /// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
-pub trait IntoCRDTTerminal<'a, T>: Sized {
-    fn into_terminal(self, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<T>;
+pub trait IntoCRDTTerminal<T>: Sized {
+    fn into_terminal(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String>;
 }
 
 /// Equivalent to infallible conversions
 /// Automatically implement [`CRDTTerminalFrom`] for anything that implements [`Into`]
-impl<T, U> CRDTTerminalFrom<'_, U> for T
+impl<T, U> CRDTTerminalFrom<U> for T
 where
     U: Into<T>,
 {
-    fn terminal_from(value: U, _keypair: &Ed25519KeyPair, _path: Vec<PathSegment>) -> Option<Self> {
-        Some(U::into(value))
+    fn terminal_from(value: U, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+        Ok(U::into(value))
     }
 }
 
 /// CRDTTerminalFrom implies CRDTTerminalFrom
-impl<'a, T, U> IntoCRDTTerminal<'a, U> for T
+impl<T, U> IntoCRDTTerminal<U> for T
 where
-    U: CRDTTerminalFrom<'a, T>,
+    U: CRDTTerminalFrom<T>,
 {
-    fn into_terminal(self, keypair: &'a Ed25519KeyPair, path: Vec<PathSegment>) -> Option<U> {
-        U::terminal_from(self, keypair, path)
+    fn into_terminal(self, id: AuthorID, path: Vec<PathSegment>) -> Result<U, String> {
+        U::terminal_from(self, id, path)
     }
 }
 
-impl CRDTTerminalFrom<'_, Value> for bool {
-    fn terminal_from(
-        value: Value,
-        _keypair: &Ed25519KeyPair,
-        _path: Vec<PathSegment>,
-    ) -> Option<Self> {
+impl CRDTTerminalFrom<Value> for bool {
+    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Bool(x) = value {
-            Some(x)
+            Ok(x)
         } else {
-            None
+            Err(format!("failed to convert {value:?} -> bool"))
         }
     }
 }
 
-impl CRDTTerminalFrom<'_, Value> for f64 {
-    fn terminal_from(
-        value: Value,
-        _keypair: &Ed25519KeyPair,
-        _path: Vec<PathSegment>,
-    ) -> Option<Self> {
+impl CRDTTerminalFrom<Value> for f64 {
+    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Number(x) = value {
-            Some(x)
+            Ok(x)
         } else {
-            None
+            Err(format!("failed to convert {value:?} -> f64"))
         }
     }
 }
 
-impl CRDTTerminalFrom<'_, Value> for String {
-    fn terminal_from(
-        value: Value,
-        _keypair: &Ed25519KeyPair,
-        _path: Vec<PathSegment>,
-    ) -> Option<Self> {
+impl CRDTTerminalFrom<Value> for String {
+    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::String(x) = value {
-            Some(x)
+            Ok(x)
         } else {
-            None
+            Err(format!("failed to convert {value:?} -> String"))
         }
     }
 }
 
-impl<'a, T> CRDTTerminalFrom<'a, Value> for LWWRegisterCRDT<'a, T>
-where
-    T: CRDTTerminalFrom<'a, Value> + Clone + Hashable,
-{
-    fn terminal_from(
-        value: Value,
-        keypair: &'a Ed25519KeyPair,
-        path: Vec<PathSegment>,
-    ) -> Option<Self> {
-        if let Some(term) = value.into_terminal(keypair, path.clone()) {
-            let mut crdt = LWWRegisterCRDT::new(keypair, path);
-            crdt.set(term);
-            Some(crdt)
+impl CRDTTerminalFrom<Value> for char {
+    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+        if let Value::String(x) = value.clone() {
+            x.chars().next().ok_or(format!(
+                "failed to convert {value:?} -> char: found a zero-length string"
+            ))
         } else {
-            None
+            Err(format!("failed to convert {value:?} -> char"))
         }
     }
 }
 
-impl<'a, T> CRDTTerminalFrom<'a, Value> for ListCRDT<'a, T>
+impl<T> CRDTTerminalFrom<Value> for LWWRegisterCRDT<T>
 where
-    T: CRDTTerminalFrom<'a, Value> + Clone + Hashable,
+    T: CRDTTerminalFrom<Value> + Clone + Hashable,
 {
-    fn terminal_from(
-        value: Value,
-        keypair: &'a Ed25519KeyPair,
-        path: Vec<PathSegment>,
-    ) -> Option<Self> {
-        if let Some(term) = value.into_terminal(keypair, path.clone()) {
-            let mut crdt = ListCRDT::new(keypair, path);
-            crdt.insert::<Value>(ROOT_ID, term);
-            Some(crdt)
+    fn terminal_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
+        let term = value.into_terminal(id, path.clone())?;
+        let mut crdt = LWWRegisterCRDT::new(id, path);
+        crdt.set(term);
+        Ok(crdt)
+    }
+}
+
+impl<T> CRDTTerminalFrom<Value> for ListCRDT<T>
+where
+    T: CRDTTerminalFrom<Value> + Clone + Hashable,
+{
+    fn terminal_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
+        if let Value::Array(arr) = value {
+            let mut crdt = ListCRDT::new(id, path.clone());
+            let result: Result<(), String> =
+                arr.into_iter().enumerate().try_for_each(|(i, val)| {
+                    let term = val.into_terminal(id, path.clone())?;
+                    crdt.insert_idx::<Value>(i, term);
+                    Ok(())
+                });
+            result?;
+            Ok(crdt)
         } else {
-            None
+            Err(format!("failed to convert {value:?} -> ListCRDT<T>"))
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use bft_crdt_derive::add_crdt_fields;
     use serde_json::json;
 
     use crate::{
-        json_crdt::{BaseCRDT, IntoCRDTTerminal, Value, CRDT},
+        json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTTerminal, Value, CRDT},
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
@@ -379,10 +424,10 @@ mod test {
     #[test]
     fn test_derive_basic() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Player<'t> {
-            x: LWWRegisterCRDT<'t, f64>,
-            y: LWWRegisterCRDT<'t, f64>,
+        #[derive(Clone, CRDT)]
+        struct Player {
+            x: LWWRegisterCRDT<f64>,
+            y: LWWRegisterCRDT<f64>,
         }
 
         let keypair = make_keypair();
@@ -394,18 +439,18 @@ mod test {
     #[test]
     fn test_derive_nested() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Position<'t> {
-            x: LWWRegisterCRDT<'t, f64>,
-            y: LWWRegisterCRDT<'t, f64>,
+        #[derive(Clone, CRDT)]
+        struct Position {
+            x: LWWRegisterCRDT<f64>,
+            y: LWWRegisterCRDT<f64>,
         }
 
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Player<'t> {
-            pos: Position<'t>,
-            balance: LWWRegisterCRDT<'t, f64>,
-            messages: ListCRDT<'t, String>,
+        #[derive(Clone, CRDT)]
+        struct Player {
+            pos: Position,
+            balance: LWWRegisterCRDT<f64>,
+            messages: ListCRDT<String>,
         }
 
         let keypair = make_keypair();
@@ -419,11 +464,11 @@ mod test {
     #[test]
     fn test_lww_ops() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Test<'t> {
-            a: LWWRegisterCRDT<'t, f64>,
-            b: LWWRegisterCRDT<'t, bool>,
-            c: LWWRegisterCRDT<'t, String>,
+        #[derive(Clone, CRDT)]
+        struct Test {
+            a: LWWRegisterCRDT<f64>,
+            b: LWWRegisterCRDT<bool>,
+            c: LWWRegisterCRDT<String>,
         }
 
         let kp1 = make_keypair();
@@ -431,11 +476,11 @@ mod test {
         let mut base1 = BaseCRDT::<Test>::new(&kp1);
         let mut base2 = BaseCRDT::<Test>::new(&kp2);
 
-        let _1_a_1 = base1.doc.a.set(3.0);
-        let _1_b_1 = base1.doc.b.set(true);
-        let _2_a_1 = base2.doc.a.set(1.5);
-        let _2_a_2 = base2.doc.a.set(2.13);
-        let _2_c_1 = base2.doc.c.set("abc".to_string());
+        let _1_a_1 = base1.doc.a.set(3.0).sign(&kp1);
+        let _1_b_1 = base1.doc.b.set(true).sign(&kp1);
+        let _2_a_1 = base2.doc.a.set(1.5).sign(&kp2);
+        let _2_a_2 = base2.doc.a.set(2.13).sign(&kp2);
+        let _2_c_1 = base2.doc.c.set("abc".to_string()).sign(&kp2);
 
         assert_eq!(base1.doc.a.view(), Some(3.0));
         assert_eq!(base2.doc.a.view(), Some(2.13));
@@ -459,11 +504,11 @@ mod test {
             })
         );
 
-        base2.apply(_1_a_1.export());
-        base2.apply(_1_b_1.export());
-        base1.apply(_2_a_1.export());
-        base1.apply(_2_a_2.export());
-        base1.apply(_2_c_1.export());
+        base2.apply(_1_a_1);
+        base2.apply(_1_b_1);
+        base1.apply(_2_a_1);
+        base1.apply(_2_a_2);
+        base1.apply(_2_c_1);
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -479,9 +524,9 @@ mod test {
     #[test]
     fn test_vec_and_map_ops() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Test<'t> {
-            a: ListCRDT<'t, String>,
+        #[derive(Clone, CRDT)]
+        struct Test {
+            a: ListCRDT<String>,
         }
 
         let kp1 = make_keypair();
@@ -489,10 +534,10 @@ mod test {
         let mut base1 = BaseCRDT::<Test>::new(&kp1);
         let mut base2 = BaseCRDT::<Test>::new(&kp2);
 
-        let _1a = base1.doc.a.insert(ROOT_ID, "a".to_string());
-        let _1b = base1.doc.a.insert(_1a.id, "b".to_string());
-        let _2c = base2.doc.a.insert(ROOT_ID, "c".to_string());
-        let _2d = base2.doc.a.insert(_1b.id, "d".to_string());
+        let _1a = base1.doc.a.insert(ROOT_ID, "a".to_string()).sign(&kp1);
+        let _1b = base1.doc.a.insert(_1a.id(), "b".to_string()).sign(&kp1);
+        let _2c = base2.doc.a.insert(ROOT_ID, "c".to_string()).sign(&kp2);
+        let _2d = base2.doc.a.insert(_1b.id(), "d".to_string()).sign(&kp2);
 
         assert_eq!(
             base1.doc.view().into_json(),
@@ -509,43 +554,53 @@ mod test {
             })
         );
 
-        base2.apply(_1b.export());
-        base2.apply(_1a.export());
-        base1.apply(_2d.export());
-        base1.apply(_2c.export());
+        base2.apply(_1b);
+        base2.apply(_1a);
+        base1.apply(_2d);
+        base1.apply(_2c);
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }
 
     #[test]
     fn test_causal_field_dependency() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Item<'t> {
-            name: LWWRegisterCRDT<'t, String>,
-            soulbound: LWWRegisterCRDT<'t, bool>,
+        #[derive(Clone, CRDT)]
+        struct Item {
+            name: LWWRegisterCRDT<String>,
+            soulbound: LWWRegisterCRDT<bool>,
         }
 
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Player<'t> {
-            inventory: ListCRDT<'t, Item<'t>>,
-            balance: LWWRegisterCRDT<'t, f64>,
+        #[derive(Clone, CRDT)]
+        struct Player {
+            inventory: ListCRDT<Item>,
+            balance: LWWRegisterCRDT<f64>,
         }
 
-        // require balance update to happen before inventory update
         let kp1 = make_keypair();
         let kp2 = make_keypair();
         let mut base1 = BaseCRDT::<Player>::new(&kp1);
         let mut base2 = BaseCRDT::<Player>::new(&kp2);
 
-        let _add_money = base1.doc.balance.set(5000.0);
-        let _spend_money = base1.doc.balance.set(3000.0);
+        // require balance update to happen before inventory update
+        let _add_money = base1.doc.balance.set(5000.0).sign(&kp1);
+        let _spend_money = base1
+            .doc
+            .balance
+            .set(3000.0)
+            .sign_with_dependencies(&kp1, vec![&_add_money]);
+
         let sword: Value = json!({
             "name": "Sword",
             "soulbound": true,
         })
         .into();
-        let _new_inventory_item = base1.doc.inventory.insert_idx(0, sword);
+        let _new_inventory_item = base1
+            .doc
+            .inventory
+            .insert_idx(0, sword)
+            .sign_with_dependencies(&kp1, vec![&_spend_money]);
+
         assert_eq!(
             base1.doc.view().into_json(),
             json!({
@@ -558,32 +613,59 @@ mod test {
                 ]
             })
         );
+
+        // do it completely out of order
+        base2.apply(_new_inventory_item);
+        base2.apply(_spend_money);
+        base2.apply(_add_money);
+        assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }
 
     #[test]
     fn test_2d_grid() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Todo<'t> {
-            grid: ListCRDT<'t, ListCRDT<'t, LWWRegisterCRDT<'t, bool>>>,
+        #[derive(Clone, CRDT)]
+        struct Game {
+            grid: ListCRDT<ListCRDT<LWWRegisterCRDT<bool>>>,
         }
+
+        let kp1 = make_keypair();
+        let kp2 = make_keypair();
+        let mut base1 = BaseCRDT::<Game>::new(&kp1);
+        let mut base2 = BaseCRDT::<Game>::new(&kp2);
+
+        // init a 2d grid
+        let row0: Value = json!([true, false]).into();
+        let row1: Value = json!([false, true]).into();
+        let construct1 = base1.doc.grid.insert_idx(0, row0).sign(&kp1);
+        let construct2 = base1.doc.grid.insert_idx(1, row1).sign(&kp1);
+        base2.apply(construct1);
+        base2.apply(construct2);
+
+        assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!([[true, false], [false, true]])
+        );
+
+        let set1 = base1.doc.grid[0][0].set(false).sign(&kp1);
+        let set2 = base2.doc.grid[1][1].set(false).sign(&kp2);
+        base1.apply(set2);
+        base2.apply(set1);
+
+        assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!([[false, false], [false, false]])
+        );
     }
 
     #[test]
-    fn test_nested_ops() {
+    fn test_arb_json() {
         #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Todo<'t> {
-            name: LWWRegisterCRDT<'t, String>,
-            due: LWWRegisterCRDT<'t, String>,
-            done: LWWRegisterCRDT<'t, bool>,
-            tags: ListCRDT<'t, String>,
-        }
-
-        #[add_crdt_fields]
-        #[derive(Debug, Clone, CRDT)]
-        struct Schedule<'t> {
-            items: ListCRDT<'t, Todo<'t>>,
+        #[derive(Clone, CRDT)]
+        struct Todo {
+            reg: LWWRegisterCRDT<Value>,
         }
     }
 }

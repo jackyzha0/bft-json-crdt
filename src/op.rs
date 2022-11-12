@@ -1,16 +1,7 @@
-use crate::json_crdt::{Value, JSONOp};
 use crate::json_crdt::{CRDTTerminalFrom, IntoCRDTTerminal};
-use crate::keypair::lsb_32;
-use crate::keypair::sign;
-use crate::keypair::AuthorID;
-use crate::keypair::SignedDigest;
+use crate::json_crdt::{SignedOp, Value};
+use crate::keypair::{sha256, AuthorID};
 use fastcrypto::ed25519::Ed25519KeyPair;
-use fastcrypto::ed25519::Ed25519PublicKey;
-use fastcrypto::ed25519::Ed25519Signature;
-use fastcrypto::traits::ToFromBytes;
-use fastcrypto::Verifier;
-use sha2::Digest;
-use sha2::Sha256;
 use std::fmt::Debug;
 
 /// A lamport clock timestamp. Used to track document versions
@@ -19,7 +10,6 @@ pub type SequenceNumber = u64;
 /// A unique ID for a single [`Op<T>`]
 pub type OpID = [u8; 32];
 pub const ROOT_ID: OpID = [0u8; 32];
-
 /// Part of a path to get to a specific CRDT in a nested CRDT
 #[derive(Clone, Debug)]
 pub enum PathSegment {
@@ -27,11 +17,19 @@ pub enum PathSegment {
     Index(OpID),
 }
 
+pub fn print_hex<const N: usize>(bytes: &[u8; N]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 pub fn print_path(path: Vec<PathSegment>) -> String {
     path.iter()
         .map(|p| match p {
             PathSegment::Field(s) => s.to_string(),
-            PathSegment::Index(i) => lsb_32(*i).to_string(),
+            PathSegment::Index(i) => print_hex(i),
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -44,11 +42,13 @@ pub fn join_path(path: Vec<PathSegment>, segment: PathSegment) -> Vec<PathSegmen
 }
 
 pub fn parse_field(path: Vec<PathSegment>) -> Option<String> {
-    if let PathSegment::Field(key) = path.last().unwrap() {
-        Some(key.to_string())
-    } else {
-        None
-    }
+    path.last().and_then(|segment| {
+        if let PathSegment::Field(key) = segment {
+            Some(key.to_string())
+        } else {
+            None
+        }
+    })
 }
 
 /// Represents a single node in a CRDT
@@ -65,13 +65,7 @@ where
     pub content: Option<T>,
     pub path: Vec<PathSegment>, // path to get to target CRDT
     pub is_deleted: bool,
-
-    // Fields that are used to detect faults/tampering
-    // This operation is valid iff
-    // 1) hashing the preimage gives us the id of the operation
-    // 2) we can verify the signed_digest was signed using the pub key of the author
-    pub id: OpID,                    // hash of the operation
-    pub signed_digest: SignedDigest, // signed hash using priv key of author
+    pub id: OpID, // hash of the operation
 }
 
 pub trait Hashable {
@@ -87,14 +81,29 @@ where
     }
 }
 
-
 impl<T> Op<T>
 where
     T: Hashable + Clone + Into<Value>,
 {
     /// Exports a specific op to be JSON generic
-    pub fn export(self) -> JSONOp {
-        JSONOp::from(self)
+    pub fn sign(self, keypair: &Ed25519KeyPair) -> SignedOp {
+        SignedOp::from_op(self, keypair, vec![])
+    }
+
+    /// Exports a specific op to be JSON generic
+    pub fn sign_with_dependencies(
+        self,
+        keypair: &Ed25519KeyPair,
+        dependencies: Vec<&SignedOp>,
+    ) -> SignedOp {
+        SignedOp::from_op(
+            self,
+            keypair,
+            dependencies
+                .iter()
+                .map(|dep| dep.signed_digest)
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
@@ -110,20 +119,19 @@ where
         self.seq
     }
 
-    pub fn into<'a, U: Hashable + Clone + CRDTTerminalFrom<'a, T>>(
+    pub fn into<U: Hashable + Clone + CRDTTerminalFrom<T>>(
         self,
-        keypair: &'a Ed25519KeyPair,
+        id: AuthorID,
         path: Vec<PathSegment>,
     ) -> Op<U> {
         Op {
-            content: self.content.and_then(|c| c.into_terminal(keypair, path)),
+            content: self.content.and_then(|c| c.into_terminal(id, path).ok()),
             origin: self.origin,
             author: self.author,
             seq: self.seq,
             path: self.path,
             is_deleted: self.is_deleted,
             id: self.id,
-            signed_digest: self.signed_digest,
         }
     }
 
@@ -134,58 +142,40 @@ where
         is_deleted: bool,
         content: Option<T>,
         path: Vec<PathSegment>,
-        keypair: &Ed25519KeyPair,
     ) -> Op<T> {
         let mut op = Self {
             origin,
             id: ROOT_ID,
             author,
-            signed_digest: [0u8; 64],
             seq,
             is_deleted,
             content,
             path,
         };
-        op.id = op.hash();
-        op.signed_digest = sign(keypair, &op.id).sig.to_bytes();
+        op.id = op.hash_to_id();
         op
     }
 
-    pub fn hash(&self) -> OpID {
+    pub fn hash_to_id(&self) -> OpID {
         let content_str = match self.content.as_ref() {
             Some(content) => content.hash(),
             None => "".to_string(),
         };
         let fmt_str = format!(
-            "{:?},{:?},{:?},{:?},{content_str},{:?}",
-            self.origin, self.author, self.seq, self.is_deleted, self.path,
+            "{:?},{:?},{:?},{:?},{content_str}",
+            self.origin, self.author, self.seq, self.is_deleted,
         );
-        let mut hasher = Sha256::new();
-        hasher.update(fmt_str.as_bytes());
-        let result = hasher.finalize();
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(&result[..]);
-        bytes
+        sha256(fmt_str)
     }
 
-    pub fn is_valid(&self) -> bool {
+    pub fn is_valid_hash(&self) -> bool {
         // make sure content is only none for deletion events
         if self.content.is_none() && !self.is_deleted {
             return false;
         }
 
         // try to avoid expensive sig check if early fail
-        if self.hash() != self.id {
-            return false;
-        }
-
-        // see if digest was actually signed by the author it claims to be signed by
-        let digest = Ed25519Signature::from_bytes(&self.signed_digest);
-        let pubkey = Ed25519PublicKey::from_bytes(&self.author);
-        match (digest, pubkey) {
-            (Ok(digest), Ok(pubkey)) => pubkey.verify(&self.id, &digest).is_ok(),
-            (_, _) => false,
-        }
+        self.hash_to_id() == self.id
     }
 
     /// Special constructor for defining the sentinel root node
@@ -194,7 +184,6 @@ where
             origin: ROOT_ID,
             id: ROOT_ID,
             author: [0u8; 32],
-            signed_digest: [0u8; 64],
             seq: 0,
             is_deleted: false,
             content: None,

@@ -44,7 +44,7 @@ fn display_author(author: AuthorID) -> String {
         .to_string()
 }
 
-impl<T> ListCRDT<'_, T>
+impl<T> ListCRDT<T>
 where
     T: Hashable + Clone,
 {

@@ -7,16 +7,32 @@ pub use fastcrypto::{
     Verifier,
 };
 use rand::rngs::OsRng;
+use sha2::{Sha256, Digest};
 
 /// Represents the ID of a unique node
 pub type AuthorID = [u8; ED25519_PUBLIC_KEY_LENGTH];
 pub type SignedDigest = [u8; ED25519_SIGNATURE_LENGTH];
+
+pub fn make_author(n: u8) -> AuthorID {
+    let mut id = [0u8; ED25519_PUBLIC_KEY_LENGTH];
+    id[0] = n;
+    id
+}
 
 pub fn lsb_32(pubkey: AuthorID) -> u32 {
     ((pubkey[0] as u32) << 24)
         + ((pubkey[1] as u32) << 16)
         + ((pubkey[2] as u32) << 8)
         + (pubkey[3] as u32)
+}
+
+pub fn sha256(input: String) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&result[..]);
+    bytes
 }
 
 pub fn make_keypair() -> Ed25519KeyPair {

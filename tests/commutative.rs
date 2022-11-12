@@ -1,7 +1,7 @@
 use bft_json_crdt::{
-    keypair::make_keypair,
+    keypair::make_author,
     list_crdt::ListCRDT,
-    op::{Op, OpID, ROOT_ID, Hashable},
+    op::{Hashable, Op, OpID, ROOT_ID},
 };
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
@@ -17,12 +17,9 @@ fn test_list_fuzz_commutative() {
     let mut op_log = Vec::<Op<char>>::new();
     let mut op_log1 = Vec::<Op<char>>::new();
     let mut op_log2 = Vec::<Op<char>>::new();
-    let key1 = make_keypair();
-    let key2 = make_keypair();
-    let keychk = make_keypair();
-    let mut l1 = ListCRDT::<char>::new(&key1, vec![]);
-    let mut l2 = ListCRDT::<char>::new(&key2, vec![]);
-    let mut chk = ListCRDT::<char>::new(&keychk, vec![]);
+    let mut l1 = ListCRDT::<char>::new(make_author(1), vec![]);
+    let mut l2 = ListCRDT::<char>::new(make_author(2), vec![]);
+    let mut chk = ListCRDT::<char>::new(make_author(3), vec![]);
     for _ in 0..TEST_N {
         let letter1: char = rng.gen_range(b'a'..=b'z') as char;
         let letter2: char = rng.gen_range(b'a'..=b'z') as char;
@@ -92,4 +89,3 @@ fn test_list_fuzz_commutative() {
     assert_eq!(l1_doc, chk_doc);
     assert_eq!(l2_doc, chk_doc);
 }
-

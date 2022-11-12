@@ -1,6 +1,5 @@
 use crate::json_crdt::CRDT;
-use crate::op::{Op, PathSegment, SequenceNumber, Hashable, OpID};
-use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
+use crate::op::{Hashable, Op, PathSegment, SequenceNumber};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -8,29 +7,26 @@ use std::fmt::Debug;
 use crate::keypair::AuthorID;
 
 #[derive(Clone)]
-pub struct LWWRegisterCRDT<'a, T>
+pub struct LWWRegisterCRDT<T>
 where
     T: Hashable + Clone,
 {
     pub our_id: AuthorID,
-    pub(crate) keypair: &'a Ed25519KeyPair,
     pub path: Vec<PathSegment>,
     value: Op<T>,
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
     highest_seq: SequenceNumber,
 }
 
-impl<T> LWWRegisterCRDT<'_, T>
+impl<T> LWWRegisterCRDT<T>
 where
     T: Hashable + Clone,
 {
-    pub fn new(keypair: &Ed25519KeyPair, path: Vec<PathSegment>) -> LWWRegisterCRDT<'_, T> {
-        let id = keypair.public().0.to_bytes();
+    pub fn new(id: AuthorID, path: Vec<PathSegment>) -> LWWRegisterCRDT<T> {
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
         LWWRegisterCRDT {
             our_id: id,
-            keypair,
             path,
             value: Op::make_root(),
             logical_clocks,
@@ -50,15 +46,13 @@ where
             false,
             Some(val),
             self.path.to_owned(),
-            self.keypair,
         );
         self.apply(op.clone());
         op
     }
 
     pub fn apply(&mut self, op: Op<T>) {
-        #[cfg(feature = "bft")]
-        if !op.is_valid() {
+        if !op.is_valid_hash() {
             return;
         }
 
@@ -88,9 +82,9 @@ where
     }
 }
 
-impl<'t, T> CRDT<'t> for LWWRegisterCRDT<'t, T>
+impl<T> CRDT for LWWRegisterCRDT<T>
 where
-    T: Hashable + Clone + 't,
+    T: Hashable + Clone,
 {
     type Inner = T;
     type View = Option<T>;
@@ -102,12 +96,12 @@ where
         self.view()
     }
 
-    fn new(keypair: &'t Ed25519KeyPair, path: Vec<PathSegment>) -> Self {
-        Self::new(keypair, path)
+    fn new(id: AuthorID, path: Vec<PathSegment>) -> Self {
+        Self::new(id, path)
     }
 }
 
-impl<'a, T> Debug for LWWRegisterCRDT<'a, T>
+impl<T> Debug for LWWRegisterCRDT<T>
 where
     T: Hashable + Clone,
 {
@@ -119,12 +113,11 @@ where
 #[cfg(test)]
 mod test {
     use super::LWWRegisterCRDT;
-    use crate::keypair::make_keypair;
+    use crate::keypair::make_author;
 
     #[test]
     fn test_lww_simple() {
-        let key = make_keypair();
-        let mut register = LWWRegisterCRDT::new(&key, vec![]);
+        let mut register = LWWRegisterCRDT::new(make_author(1), vec![]);
         assert_eq!(register.view(), None);
         register.set(1);
         assert_eq!(register.view(), Some(1));
@@ -134,10 +127,8 @@ mod test {
 
     #[test]
     fn test_lww_multiple_writer() {
-        let key1 = make_keypair();
-        let key2 = make_keypair();
-        let mut register1 = LWWRegisterCRDT::new(&key1, vec![]);
-        let mut register2 = LWWRegisterCRDT::new(&key2, vec![]);
+        let mut register1 = LWWRegisterCRDT::new(make_author(1), vec![]);
+        let mut register2 = LWWRegisterCRDT::new(make_author(2), vec![]);
         let _a = register1.set('a');
         let _b = register1.set('b');
         let _c = register2.set('c');
@@ -151,8 +142,7 @@ mod test {
 
     #[test]
     fn test_lww_idempotence() {
-        let key = make_keypair();
-        let mut register = LWWRegisterCRDT::new(&key, vec![]);
+        let mut register = LWWRegisterCRDT::new(make_author(1), vec![]);
         let op = register.set(1);
         for _ in 1..10 {
             register.apply(op.clone());
@@ -162,10 +152,8 @@ mod test {
 
     #[test]
     fn test_lww_consistent_tiebreak() {
-        let key1 = make_keypair();
-        let key2 = make_keypair();
-        let mut register1 = LWWRegisterCRDT::new(&key1, vec![]);
-        let mut register2 = LWWRegisterCRDT::new(&key2, vec![]);
+        let mut register1 = LWWRegisterCRDT::new(make_author(1), vec![]);
+        let mut register2 = LWWRegisterCRDT::new(make_author(2), vec![]);
         let _a = register1.set('a');
         let _b = register2.set('b');
         register1.apply(_b);
