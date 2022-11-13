@@ -160,6 +160,24 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                             }
                         }
                     }
+
+                    impl #crate_name::debug::DebugView for #ident {
+                        #[cfg(feature = "logging-base")]
+                        fn debug_view(&self, indent: usize) -> String {
+                            let spacing = " ".repeat(indent);
+                            let inner_spacing = " ".repeat(indent + 2);
+                            let path_str = #crate_name::op::print_path(self.path.clone());
+                            let mut inner = vec![];
+                            #(inner.push(format!("{}\"{}\": {}", inner_spacing, #ident_strings, self.#ident_literals.debug_view(indent + 4)));)*
+                            let inner_str = inner.join("\n");
+                            format!("{}{} @ /{}\n{}", spacing, #ident_str, path_str, inner_str)
+                        }
+
+                        #[cfg(not(feature = "logging-base"))]
+                        fn debug_view(&self, _indent: usize) -> String {
+                            "".to_string()
+                        }
+                    } 
                 };
 
                 // Hand the output tokens back to the compiler

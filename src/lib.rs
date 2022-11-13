@@ -1,4 +1,4 @@
-mod debug;
+pub mod debug;
 pub mod json_crdt;
 pub mod keypair;
 pub mod list_crdt;

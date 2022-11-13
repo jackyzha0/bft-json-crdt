@@ -76,12 +76,11 @@ where
             self.our_seq() + 1,
             false,
             Some(transmuted),
-            vec![],
+            self.path.to_owned(),
         );
         let new_id = op.id;
         let new_path = join_path(self.path.to_owned(), PathSegment::Index(new_id));
-        let transmuted_updated_path = content.into_terminal(self.our_id, new_path.clone()).unwrap();
-        op.path = new_path;
+        let transmuted_updated_path = content.into_terminal(self.our_id, new_path).unwrap();
         op.content = Some(transmuted_updated_path);
         self.apply(op.clone());
         op
@@ -301,6 +300,32 @@ where
 
     fn new(id: AuthorID, path: Vec<PathSegment>) -> Self {
         Self::new(id, path)
+    }
+}
+
+#[cfg(feature = "logging-base")]
+use crate::debug::DebugView;
+#[cfg(feature = "logging-base")]
+impl<T> DebugView for ListCRDT<T>
+where
+    T: Hashable + Clone + DebugView,
+{
+    fn debug_view(&self, indent: usize) -> String {
+        let spacing = " ".repeat(indent);
+        let path_str = print_path(self.path.clone());
+        let inner = self
+            .ops
+            .iter()
+            .map(|op| {
+                format!(
+                    "{spacing}{}: {}",
+                    &print_hex(&op.id)[..6],
+                    op.debug_view(indent)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("List CRDT @ /{path_str}\n{inner}")
     }
 }
 

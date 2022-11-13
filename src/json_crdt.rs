@@ -1,10 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use crate::{
     keypair::{sha256, sign, AuthorID, SignedDigest},
     list_crdt::ListCRDT,
     lww_crdt::LWWRegisterCRDT,
-    op::{print_hex, print_path, Hashable, Op, OpID, PathSegment},
+    op::{print_hex, print_path, Hashable, Op, OpID, PathSegment}, debug::DebugView,
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{
@@ -46,7 +49,7 @@ impl SignedOp {
         self.inner.id
     }
 
-    fn author(&self) -> AuthorID {
+    pub fn author(&self) -> AuthorID {
         self.inner.author()
     }
 
@@ -75,7 +78,7 @@ impl SignedOp {
     }
 
     /// Ensure digest was actually signed by the author it claims to be signed by
-    fn is_valid_digest(&self) -> bool {
+    pub fn is_valid_digest(&self) -> bool {
         let digest = Ed25519Signature::from_bytes(&self.signed_digest);
         let pubkey = Ed25519PublicKey::from_bytes(&self.author());
         match (digest, pubkey) {
@@ -110,7 +113,7 @@ impl SignedOp {
 }
 
 #[allow(dead_code)]
-impl<'a, T: CRDT<Inner = Value>> BaseCRDT<'a, T> {
+impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
     pub fn new(keypair: &'a Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
@@ -123,9 +126,11 @@ impl<'a, T: CRDT<Inner = Value>> BaseCRDT<'a, T> {
     }
 
     pub fn apply(&mut self, op: SignedOp) {
+        self.log_try_apply();
+
         #[cfg(feature = "bft")]
         if !op.is_valid_digest() {
-            println!("invalid digest");
+            self.debug_digest_failure(op);
             return;
         }
 
@@ -133,6 +138,7 @@ impl<'a, T: CRDT<Inner = Value>> BaseCRDT<'a, T> {
         if !op.depends_on.is_empty() {
             for origin in &op.depends_on {
                 if !self.received.contains(origin) {
+                    self.log_missing_causal_dep(origin);
                     self.message_q.entry(*origin).or_default().push(op);
                     return;
                 }
@@ -140,8 +146,9 @@ impl<'a, T: CRDT<Inner = Value>> BaseCRDT<'a, T> {
         }
 
         // apply all of its causal dependents if there are any
-        println!("applying path: {}", print_path(op.inner.path.clone()));
+        self.log_finish_apply(&op);
         self.doc.apply(op.inner);
+        self.debug_view();
         self.received.insert(op_id);
         let dependent_queue = self.message_q.remove(&op_id);
         if let Some(mut q) = dependent_queue {
@@ -160,6 +167,47 @@ pub enum Value {
     String(String),
     Array(Vec<Value>),
     Object(HashMap<String, Value>),
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Value::Null => "null".to_string(),
+                Value::Bool(b) => b.to_string(),
+                Value::Number(n) => n.to_string(),
+                Value::String(s) => format!("\"{s}\""),
+                Value::Array(arr) => {
+                    if arr.len() > 1 {
+                        format!(
+                            "[\n{}\n]",
+                            arr.iter()
+                                .map(|x| format!("  {x}"))
+                                .collect::<Vec<_>>()
+                                .join(",\n")
+                        )
+                    } else {
+                        format!(
+                            "[ {} ]",
+                            arr.iter()
+                                .map(|x| x.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    }
+                }
+                Value::Object(obj) => format!(
+                    "{{ {} }}",
+                    obj.iter()
+                        .map(|(k, v)| format!("  \"{k}\": {v}"))
+                        .collect::<Vec<_>>()
+                        .join(",\n")
+                ),
+            }
+        )
+    }
 }
 
 impl Default for Value {
@@ -639,6 +687,8 @@ mod test {
         let row1: Value = json!([false, true]).into();
         let construct1 = base1.doc.grid.insert_idx(0, row0).sign(&kp1);
         let construct2 = base1.doc.grid.insert_idx(1, row1).sign(&kp1);
+        base1.debug_view();
+
         base2.apply(construct1);
         base2.apply(construct2);
 

@@ -29,7 +29,7 @@ pub fn print_path(path: Vec<PathSegment>) -> String {
     path.iter()
         .map(|p| match p {
             PathSegment::Field(s) => s.to_string(),
-            PathSegment::Index(i) => print_hex(i),
+            PathSegment::Index(i) => print_hex(i)[..6].to_string(),
         })
         .collect::<Vec<_>>()
         .join(".")
@@ -52,13 +52,11 @@ pub fn parse_field(path: Vec<PathSegment>) -> Option<String> {
 }
 
 /// Represents a single node in a CRDT
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Op<T>
 where
     T: Hashable + Clone,
 {
-    // Main content of the operation
-    // Pre-image of hash
     pub origin: OpID,
     pub author: AuthorID, // pub key of author
     pub seq: SequenceNumber,
@@ -175,7 +173,11 @@ where
         }
 
         // try to avoid expensive sig check if early fail
-        self.hash_to_id() == self.id
+        let res = self.hash_to_id() == self.id;
+        if !res {
+            self.debug_hash_failure();
+        }
+        res
     }
 
     /// Special constructor for defining the sentinel root node

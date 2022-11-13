@@ -7,8 +7,10 @@ edition = "2021"
 crate-type = ["lib","cdylib"]
 
 [features]
-default = ["bft"]
-logging = []
+default = ["bft", "logging-json"]
+logging-list = ["logging-base"]
+logging-json = ["logging-base"]
+logging-base = []
 bft = []
 
 [dependencies]
