@@ -119,11 +119,9 @@ where
 
     pub fn into<U: Hashable + Clone + CRDTTerminalFrom<T>>(
         self,
-        id: AuthorID,
-        path: Vec<PathSegment>,
     ) -> Op<U> {
         Op {
-            content: self.content.and_then(|c| c.into_terminal(id, path).ok()),
+            content: self.content.and_then(|c| c.into_terminal(self.author, self.path.clone()).ok()),
             origin: self.origin,
             author: self.author,
             seq: self.seq,

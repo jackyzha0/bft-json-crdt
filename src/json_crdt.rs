@@ -86,19 +86,18 @@ impl SignedOp {
             (_, _) => false,
         }
     }
-}
 
-impl SignedOp {
     pub fn from_op<T: Hashable + Clone + Into<Value>>(
         value: Op<T>,
         keypair: &Ed25519KeyPair,
         depends_on: Vec<SignedDigest>,
     ) -> Self {
+        let author = keypair.public().0.to_bytes(); 
         let mut new = Self {
             inner: Op {
                 content: value.content.map(|c| c.into()),
                 origin: value.origin,
-                author: value.author,
+                author,
                 seq: value.seq,
                 path: value.path,
                 is_deleted: value.is_deleted,
@@ -126,7 +125,7 @@ impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
     }
 
     pub fn apply(&mut self, op: SignedOp) {
-        self.log_try_apply();
+        self.log_try_apply(&op);
 
         #[cfg(feature = "bft")]
         if !op.is_valid_digest() {
@@ -146,7 +145,7 @@ impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
         }
 
         // apply all of its causal dependents if there are any
-        self.log_finish_apply(&op);
+        self.log_actually_apply(&op);
         self.doc.apply(op.inner);
         self.debug_view();
         self.received.insert(op_id);
@@ -426,12 +425,13 @@ impl CRDTTerminalFrom<Value> for char {
 
 impl<T> CRDTTerminalFrom<Value> for LWWRegisterCRDT<T>
 where
-    T: CRDTTerminalFrom<Value> + Clone + Hashable,
+    T: CRDTTerminalFrom<Value> + Clone + Hashable + Display,
 {
     fn terminal_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
         let term = value.into_terminal(id, path.clone())?;
         let mut crdt = LWWRegisterCRDT::new(id, path);
         crdt.set(term);
+        println!("{}", crdt.debug_view(0));
         Ok(crdt)
     }
 }
@@ -686,6 +686,7 @@ mod test {
         let row0: Value = json!([true, false]).into();
         let row1: Value = json!([false, true]).into();
         let construct1 = base1.doc.grid.insert_idx(0, row0).sign(&kp1);
+        base1.debug_view();
         let construct2 = base1.doc.grid.insert_idx(1, row1).sign(&kp1);
         base1.debug_view();
 
@@ -695,7 +696,9 @@ mod test {
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
             base1.doc.view().into_json(),
-            json!([[true, false], [false, true]])
+            json!({
+                "grid": [[true, false], [false, true]]
+            })
         );
 
         let set1 = base1.doc.grid[0][0].set(false).sign(&kp1);
@@ -706,7 +709,9 @@ mod test {
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
             base1.doc.view().into_json(),
-            json!([[false, false], [false, false]])
+            json!({
+                "grid": [[false, false], [false, false]]
+            })
         );
     }
 

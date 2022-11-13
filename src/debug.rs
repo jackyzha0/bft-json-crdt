@@ -9,7 +9,7 @@ use crate::{
 use {
     crate::{
         keypair::{lsb_32, AuthorID},
-        op::{ROOT_ID, print_hex, print_path},
+        op::{print_hex, print_path, ROOT_ID},
     },
     colored::Colorize,
     random_color::{Luminosity, RandomColor},
@@ -21,7 +21,7 @@ use std::fmt::Display;
 
 #[cfg(feature = "logging-base")]
 fn author_to_hex(author: AuthorID) -> String {
-    format!("{:#x}", lsb_32(author))
+    format!("{:#010x}", lsb_32(author))
 }
 
 #[cfg(feature = "logging-base")]
@@ -56,15 +56,17 @@ pub trait DebugView {
 impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
     pub fn debug_view(&self) {
         #[cfg(feature = "logging-json")]
-        println!(
-            "document is now:\n{}",
-            self.doc.debug_view(0)
-        );
+        println!("document is now:\n{}", self.doc.debug_view(0));
     }
 
-    pub fn log_try_apply(&self) {
+    pub fn log_try_apply(&self, op: &SignedOp) {
         #[cfg(feature = "logging-json")]
-        println!("{} applying operation", display_author(self.id),);
+        println!(
+            "{} trying to apply operation {} from {}",
+            display_author(self.id),
+            &print_hex(&op.signed_digest)[..6],
+            display_author(op.inner.author())
+        );
     }
 
     pub fn debug_digest_failure(&self, _op: SignedOp) {
@@ -85,12 +87,18 @@ impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
         );
     }
 
-    pub fn log_finish_apply(&self, _op: &SignedOp) {
+    pub fn log_actually_apply(&self, _op: &SignedOp) {
         #[cfg(feature = "logging-json")]
-        println!(
-            "  applying op to path: /{}",
-            print_path(_op.inner.path.clone())
-        );
+        {
+            println!(
+                "  applying op to path: /{}",
+                print_path(_op.inner.path.clone())
+            );
+            println!(
+                "{}",
+                _op.inner.debug_view(2)
+            );
+        }
     }
 }
 
@@ -135,7 +143,7 @@ where
     #[cfg(feature = "logging-json")]
     fn debug_view(&self, indent: usize) -> String {
         let op_id = display_op_id(self);
-        let content = if self.id == ROOT_ID {
+        let content = if self.id == ROOT_ID && self.content.is_none() {
             "root".blue().bold().to_string()
         } else {
             self.content

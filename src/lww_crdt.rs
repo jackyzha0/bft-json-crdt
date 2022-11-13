@@ -1,6 +1,8 @@
+use rand::{Rng, RngCore};
+
 use crate::debug::DebugView;
 use crate::json_crdt::CRDT;
-use crate::op::{Hashable, Op, PathSegment, SequenceNumber, print_path};
+use crate::op::{print_path, Hashable, Op, PathSegment, SequenceNumber, ROOT_ID, print_hex};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -62,11 +64,20 @@ where
 
         // take most recent update by sequence number
         match seq.cmp(&self.our_seq()) {
-            Ordering::Greater => self.value = op,
+            Ordering::Greater => {
+                self.value = Op {
+                    id: self.value.id,
+                    ..op
+                };
+            }
             Ordering::Equal => {
                 // if we are equal, tie break on author
-                if op.author() < self.our_id {
-                    self.value = op
+                if op.author() < self.value.author() {
+                    // we want to keep id constant so replace everything but id
+                    self.value = Op {
+                        id: self.value.id,
+                        ..op
+                    };
                 }
             }
             Ordering::Less => {} // LWW, ignore if its outdate
@@ -102,14 +113,17 @@ where
     }
 }
 
-impl<T> DebugView for LWWRegisterCRDT<T> where T: Hashable + Clone + DebugView {
+impl<T> DebugView for LWWRegisterCRDT<T>
+where
+    T: Hashable + Clone + DebugView,
+{
     fn debug_view(&self, indent: usize) -> String {
         let spacing = " ".repeat(indent);
         let path_str = print_path(self.path.clone());
         let inner = self.value.debug_view(indent + 2);
         format!("LWW Register CRDT @ /{path_str}\n{spacing}{inner}")
     }
-} 
+}
 
 impl<T> Debug for LWWRegisterCRDT<T>
 where

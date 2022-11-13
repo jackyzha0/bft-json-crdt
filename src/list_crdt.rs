@@ -80,8 +80,9 @@ where
         );
         let new_id = op.id;
         let new_path = join_path(self.path.to_owned(), PathSegment::Index(new_id));
-        let transmuted_updated_path = content.into_terminal(self.our_id, new_path).unwrap();
+        let transmuted_updated_path = content.into_terminal(self.our_id, new_path.clone()).unwrap();
         op.content = Some(transmuted_updated_path);
+        op.path = new_path;
         self.apply(op.clone());
         op
     }
