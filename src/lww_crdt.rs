@@ -1,8 +1,6 @@
-use rand::{Rng, RngCore};
-
 use crate::debug::DebugView;
-use crate::json_crdt::CRDT;
-use crate::op::{print_path, Hashable, Op, PathSegment, SequenceNumber, ROOT_ID, print_hex};
+use crate::json_crdt::{CRDTNode, Value};
+use crate::op::{print_path, Op, PathSegment, SequenceNumber};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -12,7 +10,7 @@ use crate::keypair::AuthorID;
 #[derive(Clone)]
 pub struct LWWRegisterCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     pub our_id: AuthorID,
     pub path: Vec<PathSegment>,
@@ -23,7 +21,7 @@ where
 
 impl<T> LWWRegisterCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     pub fn new(id: AuthorID, path: Vec<PathSegment>) -> LWWRegisterCRDT<T> {
         let mut logical_clocks = HashMap::new();
@@ -41,24 +39,25 @@ where
         *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
-    pub fn set(&mut self, val: T) -> Op<T> {
+    pub fn set<U: Into<Value>>(&mut self, content: U) -> Op<Value> {
         let op = Op::new(
             self.value.id,
             self.our_id,
             self.our_seq() + 1,
             false,
-            Some(val),
+            Some(content.into()),
             self.path.to_owned(),
         );
         self.apply(op.clone());
         op
     }
 
-    pub fn apply(&mut self, op: Op<T>) {
+    pub fn apply(&mut self, op: Op<Value>) {
         if !op.is_valid_hash() {
             return;
         }
 
+        let op: Op<T> = op.into();
         let author = op.author();
         let seq = op.sequence_num();
 
@@ -94,18 +93,16 @@ where
     }
 }
 
-impl<T> CRDT for LWWRegisterCRDT<T>
+impl<T> CRDTNode for LWWRegisterCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
-    type Inner = T;
-    type View = Option<T>;
-    fn apply(&mut self, op: Op<Self::Inner>) {
-        self.apply(op)
+    fn apply(&mut self, op: Op<Value>) {
+        self.apply(op.into())
     }
 
-    fn view(&self) -> Self::View {
-        self.view()
+    fn view(&self) -> Value {
+        self.view().into()
     }
 
     fn new(id: AuthorID, path: Vec<PathSegment>) -> Self {
@@ -115,7 +112,7 @@ where
 
 impl<T> DebugView for LWWRegisterCRDT<T>
 where
-    T: Hashable + Clone + DebugView,
+    T: CRDTNode + DebugView,
 {
     fn debug_view(&self, indent: usize) -> String {
         let spacing = " ".repeat(indent);
@@ -127,7 +124,7 @@ where
 
 impl<T> Debug for LWWRegisterCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value.id)
@@ -187,5 +184,6 @@ mod test {
         register2.apply(_c);
         register1.apply(_d);
         assert_eq!(register1.view(), register2.view());
+        assert_eq!(register1.view(), Some('c'));
     }
 }

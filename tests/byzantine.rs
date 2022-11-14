@@ -1,5 +1,5 @@
 use bft_json_crdt::{
-    json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTTerminal, CRDT},
+    json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTNode, CRDTNode},
     keypair::make_keypair,
     list_crdt::ListCRDT,
     op::{Op, ROOT_ID},
@@ -18,7 +18,7 @@ use bft_json_crdt::{
 // 5. block actual messages from honest actors (eclipse attack)
 
 #[add_crdt_fields]
-#[derive(Clone, CRDT)]
+#[derive(Clone, CRDTNode)]
 struct ListExample {
     list: ListCRDT<char>,
 }

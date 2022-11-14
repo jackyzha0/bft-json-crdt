@@ -1,5 +1,6 @@
 use crate::{
-    json_crdt::{IntoCRDTTerminal, CRDT},
+    debug::debug_path_mismatch,
+    json_crdt::{CRDTNode, Value},
     keypair::AuthorID,
     op::*,
 };
@@ -13,7 +14,7 @@ use std::{
 #[derive(Clone)]
 pub struct ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     /// List of all the operations we know of
     pub(crate) ops: Vec<Op<T>>,
@@ -37,7 +38,7 @@ where
 
 impl<T> ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     /// Create a new List CRDT with the given AuthorID.
     /// AuthorID should be unique.
@@ -62,37 +63,26 @@ where
     }
 
     /// Locally insert some content causally after the given operation
-    pub fn insert<U: IntoCRDTTerminal<T> + Hashable + Clone>(
-        &mut self,
-        after: OpID,
-        content: U,
-    ) -> Op<T> {
+    pub fn insert<U: Into<Value>>(&mut self, after: OpID, content: U) -> Op<Value> {
         // first, make an op that has no path
         // we need to know the op ID before adding a path segment for the subelement
-        let transmuted: T = content.clone().into_terminal(self.our_id, vec![]).unwrap();
         let mut op = Op::new(
             after,
             self.our_id,
             self.our_seq() + 1,
             false,
-            Some(transmuted),
+            Some(content.into()),
             self.path.to_owned(),
         );
         let new_id = op.id;
         let new_path = join_path(self.path.to_owned(), PathSegment::Index(new_id));
-        let transmuted_updated_path = content.into_terminal(self.our_id, new_path.clone()).unwrap();
-        op.content = Some(transmuted_updated_path);
         op.path = new_path;
         self.apply(op.clone());
         op
     }
 
     /// Shorthand function to insert at index locally
-    pub fn insert_idx<U: IntoCRDTTerminal<T> + Hashable + Clone>(
-        &mut self,
-        idx: usize,
-        content: U,
-    ) -> Op<T> {
+    pub fn insert_idx<U: Into<Value> + Clone>(&mut self, idx: usize, content: U) -> Op<Value> {
         let mut i = 0;
         for op in &self.ops {
             if !op.is_deleted {
@@ -106,7 +96,7 @@ where
     }
 
     /// Mark a node as deleted. Will panic if the node doesn't exist
-    pub fn delete(&mut self, id: OpID) -> Op<T> {
+    pub fn delete(&mut self, id: OpID) -> Op<Value> {
         let op = Op::new(
             id,
             self.our_id,
@@ -126,41 +116,43 @@ where
 
     /// Apply an operation (both local and remote) to this local list CRDT.
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
-    pub fn apply(&mut self, op: Op<T>) {
+    pub fn apply(&mut self, op: Op<Value>) {
         if !op.is_valid_hash() {
             return;
         }
 
-        let op_id = op.id;
-        let author = op.author();
-        let seq = op.sequence_num();
-        let origin_id = self.find_idx(op.origin);
-
-        // we haven't received the causal parent of this operation yet, queue this it up for later
-        if origin_id.is_none() {
-            self.message_q.entry(op.origin).or_default().push(op);
+        // make sure we are on a subpath
+        if !ensure_subpath(&self.path, &op.path) {
+            debug_path_mismatch(self.path.to_owned(), op.path);
             return;
         }
 
-        // integrate operation locally and update bookkeeping
-        self.log_apply(&op);
-        self.integrate(op, origin_id.unwrap());
-
-        // update sequence number for sender and for ourselves
-        self.logical_clocks.insert(author, seq);
-        self.highest_seq = max(self.highest_seq, seq);
-        self.logical_clocks.insert(self.our_id, self.highest_seq);
-
-        // log result
-        self.log_ops(Some(op_id));
-
-        // apply all of its causal dependents if there are any
-        let dependent_queue = self.message_q.remove(&op_id);
-        if let Some(mut q) = dependent_queue {
-            for dependent in q.drain(..) {
-                self.apply(dependent);
+        // haven't reached end yet, navigate
+        if op.path.len() - 1 > self.path.len() {
+            if let Some(PathSegment::Index(op_id)) = op.path.get(self.path.len()) {
+                let op_id = op_id.to_owned();
+                if let Some(idx) = self.find_idx(op_id) {
+                    if self.ops[idx].content.is_none() {
+                        return;
+                    } else {
+                        self.ops[idx].content.as_mut().unwrap().apply(op);
+                        return;
+                    }
+                } else {
+                    debug_path_mismatch(
+                        join_path(self.path.to_owned(), PathSegment::Index(op_id)),
+                        op.path,
+                    );
+                    return;
+                };
+            } else {
+                debug_path_mismatch(self.path.to_owned(), op.path);
+                return;
             }
         }
+
+        // otherwise, this is just a direct replacement
+        self.integrate(op.into());
     }
 
     /// Main CRDT logic of integrating an op properly into our local log
@@ -170,8 +162,23 @@ where
     /// Effectively, we
     /// 1) find the parent item
     /// 2) find the right spot to insert before the next node
-    fn integrate(&mut self, new_op: Op<T>, new_op_parent_idx: usize) {
+    fn integrate(&mut self, new_op: Op<T>) {
+        let op_id = new_op.id;
+        let author = new_op.author();
+        let seq = new_op.sequence_num();
+        let origin_id = self.find_idx(new_op.origin);
+
+        // we haven't received the causal parent of this operation yet, queue this it up for later
+        if origin_id.is_none() {
+            self.message_q.entry(new_op.origin).or_default().push(new_op);
+            return;
+        }
+
+        let new_op_parent_idx = origin_id.unwrap();
+
+
         // if its a delete operation, we don't need to do much
+        self.log_apply(&new_op);
         if new_op.is_deleted {
             let mut op = &mut self.ops[new_op_parent_idx];
             op.is_deleted = true;
@@ -215,6 +222,22 @@ where
 
         // insert at i
         self.ops.insert(i, new_op);
+        
+        // update sequence number for sender and for ourselves
+        self.logical_clocks.insert(author, seq);
+        self.highest_seq = max(self.highest_seq, seq);
+        self.logical_clocks.insert(self.our_id, self.highest_seq);
+
+        // log result
+        self.log_ops(Some(op_id));
+
+        // apply all of its causal dependents if there are any
+        let dependent_queue = self.message_q.remove(&op_id);
+        if let Some(mut q) = dependent_queue {
+            for dependent in q.drain(..) {
+                self.integrate(dependent);
+            }
+        }
     }
 
     /// Make an iterator out of list CRDT contents, ignoring deleted items and empty content
@@ -233,7 +256,7 @@ where
 
 impl<T> Debug for ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -250,7 +273,7 @@ where
 
 impl<T> Index<usize> for ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     type Output = T;
     fn index(&self, idx: usize) -> &Self::Output {
@@ -269,7 +292,7 @@ where
 
 impl<T> IndexMut<usize> for ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         let mut i = 0;
@@ -285,18 +308,16 @@ where
     }
 }
 
-impl<T> CRDT for ListCRDT<T>
+impl<T> CRDTNode for ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
-    type Inner = T;
-    type View = Vec<T>;
-    fn apply(&mut self, op: Op<Self::Inner>) {
-        self.apply(op)
+    fn apply(&mut self, op: Op<Value>) {
+        self.apply(op.into())
     }
 
-    fn view(&self) -> Self::View {
-        self.view()
+    fn view(&self) -> Value {
+        self.view().into()
     }
 
     fn new(id: AuthorID, path: Vec<PathSegment>) -> Self {
@@ -309,7 +330,7 @@ use crate::debug::DebugView;
 #[cfg(feature = "logging-base")]
 impl<T> DebugView for ListCRDT<T>
 where
-    T: Hashable + Clone + DebugView,
+    T: CRDTNode + DebugView,
 {
     fn debug_view(&self, indent: usize) -> String {
         let spacing = " ".repeat(indent);
@@ -336,7 +357,7 @@ mod test {
 
     #[test]
     fn test_list_simple() {
-        let mut list = ListCRDT::<i32>::new(make_author(1), vec![]);
+        let mut list = ListCRDT::<i64>::new(make_author(1), vec![]);
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
@@ -346,7 +367,7 @@ mod test {
 
     #[test]
     fn test_list_idempotence() {
-        let mut list = ListCRDT::<i32>::new(make_author(1), vec![]);
+        let mut list = ListCRDT::<i64>::new(make_author(1), vec![]);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
             list.apply(op.clone());

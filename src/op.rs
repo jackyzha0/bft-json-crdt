@@ -1,5 +1,4 @@
-use crate::json_crdt::{CRDTTerminalFrom, IntoCRDTTerminal};
-use crate::json_crdt::{SignedOp, Value};
+use crate::json_crdt::{CRDTNode, CRDTNodeFromValue, SignedOp, Value, IntoCRDTNode};
 use crate::keypair::{sha256, AuthorID};
 use fastcrypto::ed25519::Ed25519KeyPair;
 use std::fmt::Debug;
@@ -11,7 +10,7 @@ pub type SequenceNumber = u64;
 pub type OpID = [u8; 32];
 pub const ROOT_ID: OpID = [0u8; 32];
 /// Part of a path to get to a specific CRDT in a nested CRDT
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PathSegment {
     Field(String),
     Index(OpID),
@@ -35,6 +34,20 @@ pub fn print_path(path: Vec<PathSegment>) -> String {
         .join(".")
 }
 
+pub fn ensure_subpath(our_path: &Vec<PathSegment>, op_path: &Vec<PathSegment>) -> bool {
+    if our_path.len() > op_path.len() {
+        return false;
+    }
+    for i in 0..our_path.len() {
+        let ours = our_path.get(i);
+        let theirs = op_path.get(i);
+        if ours != theirs {
+            return false;
+        }
+    }
+    true
+}
+
 pub fn join_path(path: Vec<PathSegment>, segment: PathSegment) -> Vec<PathSegment> {
     let mut p = path;
     p.push(segment);
@@ -55,7 +68,7 @@ pub fn parse_field(path: Vec<PathSegment>) -> Option<String> {
 #[derive(Clone)]
 pub struct Op<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     pub origin: OpID,
     pub author: AuthorID, // pub key of author
@@ -79,9 +92,24 @@ where
     }
 }
 
+impl Op<Value> {
+    pub fn into<T: CRDTNodeFromValue + CRDTNode>(self) -> Op<T> {
+        // TODO instead of doing ok(), unwrap inner error and report it
+        Op {
+            content: self.content.and_then(|c| c.into_node(self.id, self.path.clone()).ok()),
+            origin: self.origin,
+            author: self.author,
+            seq: self.seq,
+            path: self.path,
+            is_deleted: self.is_deleted,
+            id: self.id,
+        }
+    }
+}
+
 impl<T> Op<T>
 where
-    T: Hashable + Clone + Into<Value>,
+    T: CRDTNode,
 {
     /// Exports a specific op to be JSON generic
     pub fn sign(self, keypair: &Ed25519KeyPair) -> SignedOp {
@@ -103,32 +131,13 @@ where
                 .collect::<Vec<_>>(),
         )
     }
-}
 
-impl<T> Op<T>
-where
-    T: Hashable + Clone,
-{
     pub fn author(&self) -> AuthorID {
         self.author
     }
 
     pub fn sequence_num(&self) -> SequenceNumber {
         self.seq
-    }
-
-    pub fn into<U: Hashable + Clone + CRDTTerminalFrom<T>>(
-        self,
-    ) -> Op<U> {
-        Op {
-            content: self.content.and_then(|c| c.into_terminal(self.author, self.path.clone()).ok()),
-            origin: self.origin,
-            author: self.author,
-            seq: self.seq,
-            path: self.path,
-            is_deleted: self.is_deleted,
-            id: self.id,
-        }
     }
 
     pub fn new(

@@ -1,8 +1,8 @@
 use crate::{
-    json_crdt::{BaseCRDT, SignedOp, Value, CRDT},
+    json_crdt::{BaseCRDT, SignedOp, CRDTNode},
     keypair::SignedDigest,
     list_crdt::ListCRDT,
-    op::{Hashable, Op, OpID},
+    op::{Op, OpID, PathSegment},
 };
 
 #[cfg(feature = "logging-base")]
@@ -25,7 +25,7 @@ fn author_to_hex(author: AuthorID) -> String {
 }
 
 #[cfg(feature = "logging-base")]
-fn display_op_id<T: Clone + Hashable>(op: &Op<T>) -> String {
+fn display_op_id<T: CRDTNode>(op: &Op<T>) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
         .seed(lsb_32(op.author))
@@ -35,6 +35,18 @@ fn display_op_id<T: Clone + Hashable>(op: &Op<T>) -> String {
         author_to_hex(op.author).bold().truecolor(r, g, b),
         op.seq.to_string().yellow()
     )
+}
+
+pub fn debug_path_mismatch(_our_path: Vec<PathSegment>, _op_path: Vec<PathSegment>) {
+    #[cfg(feature = "logging-base")]
+    {
+        println!(
+            "  {}\ncurrent path: {}\nop path: {}",
+            "path mismatch!".red(),
+            print_path(_our_path),
+            print_path(_op_path),
+        );
+    }
 }
 
 #[cfg(feature = "logging-base")]
@@ -53,7 +65,7 @@ pub trait DebugView {
     fn debug_view(&self, indent: usize) -> String;
 }
 
-impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
+impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
     pub fn debug_view(&self) {
         #[cfg(feature = "logging-json")]
         println!("document is now:\n{}", self.doc.debug_view(0));
@@ -94,17 +106,14 @@ impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
                 "  applying op to path: /{}",
                 print_path(_op.inner.path.clone())
             );
-            println!(
-                "{}",
-                _op.inner.debug_view(2)
-            );
+            println!("{}", _op.inner.debug_view(2));
         }
     }
 }
 
 impl<T> Op<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     pub fn debug_hash_failure(&self) {
         #[cfg(feature = "logging-base")]
@@ -133,7 +142,7 @@ where
 
 impl<T> DebugView for Op<T>
 where
-    T: DebugView + Hashable + Clone,
+    T: DebugView + CRDTNode,
 {
     #[cfg(not(feature = "logging-base"))]
     fn debug_view(&self, _indent: usize) -> String {
@@ -162,7 +171,7 @@ where
 
 impl<T> ListCRDT<T>
 where
-    T: Hashable + Clone,
+    T: CRDTNode,
 {
     pub fn log_ops(&self, _highlight: Option<OpID>) {
         #[cfg(feature = "logging-list")]

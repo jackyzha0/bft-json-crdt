@@ -4,10 +4,11 @@ use std::{
 };
 
 use crate::{
+    debug::DebugView,
     keypair::{sha256, sign, AuthorID, SignedDigest},
     list_crdt::ListCRDT,
     lww_crdt::LWWRegisterCRDT,
-    op::{print_hex, print_path, Hashable, Op, OpID, PathSegment}, debug::DebugView,
+    op::{print_hex, print_path, Hashable, Op, OpID, PathSegment},
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{
@@ -16,16 +17,41 @@ use fastcrypto::{
     Verifier,
 };
 
-pub trait CRDT {
-    type Inner: Hashable + Clone;
-    type View;
-    fn apply(&mut self, op: Op<Self::Inner>);
-    fn view(&self) -> Self::View;
+// Anything that can be nested in a JSON CRDT
+pub trait CRDTNode: CRDTNodeFromValue + Hashable + Clone {
+    fn apply(&mut self, op: Op<Value>);
+    fn view(&self) -> Value;
     fn new(id: AuthorID, path: Vec<PathSegment>) -> Self;
 }
 
+/// implement CRDTNode for non-CRDTs
+pub trait MarkPrimitive: Into<Value> + Default {}
+impl MarkPrimitive for bool {}
+impl MarkPrimitive for i32 {}
+impl MarkPrimitive for i64 {}
+impl MarkPrimitive for f64 {}
+impl MarkPrimitive for char {}
+impl MarkPrimitive for String {}
+impl MarkPrimitive for Value {}
+impl<T> CRDTNode for T
+where
+    T: CRDTNodeFromValue + MarkPrimitive + Hashable + Clone,
+{
+    fn apply(&mut self, _op: Op<Value>) {
+        unreachable!()
+    }
+
+    fn view(&self) -> Value {
+        self.to_owned().into()
+    }
+
+    fn new(_id: AuthorID, _path: Vec<PathSegment>) -> Self {
+        unreachable!()
+    }
+}
+
 #[allow(dead_code)]
-pub struct BaseCRDT<'a, T: CRDT> {
+pub struct BaseCRDT<'a, T: CRDTNode> {
     pub id: AuthorID,
     keypair: &'a Ed25519KeyPair,
     pub doc: T,
@@ -38,6 +64,9 @@ pub struct BaseCRDT<'a, T: CRDT> {
 #[derive(Clone)]
 pub struct SignedOp {
     /// Effectively [`OpID`] Use this as the ID to figure out what has been delivered already
+    pub author: AuthorID, // author of the op note that this can be different from
+    // author of the inner op as inner op could have been created
+    // by a different person
     pub signed_digest: SignedDigest, // signed hash using priv key of author
     pub inner: Op<Value>,
     pub depends_on: Vec<SignedDigest>,
@@ -50,7 +79,7 @@ impl SignedOp {
     }
 
     pub fn author(&self) -> AuthorID {
-        self.inner.author()
+        self.author
     }
 
     /// Creates a digest of the following fields. Any changes in the fields will change the signed digest
@@ -87,22 +116,23 @@ impl SignedOp {
         }
     }
 
-    pub fn from_op<T: Hashable + Clone + Into<Value>>(
+    pub fn from_op<T: CRDTNode>(
         value: Op<T>,
         keypair: &Ed25519KeyPair,
         depends_on: Vec<SignedDigest>,
     ) -> Self {
-        let author = keypair.public().0.to_bytes(); 
+        let author = keypair.public().0.to_bytes();
         let mut new = Self {
             inner: Op {
-                content: value.content.map(|c| c.into()),
+                content: value.content.map(|c| c.view()),
                 origin: value.origin,
-                author,
+                author: value.author,
                 seq: value.seq,
                 path: value.path,
                 is_deleted: value.is_deleted,
                 id: value.id,
             },
+            author,
             signed_digest: [0u8; 64],
             depends_on,
         };
@@ -112,7 +142,7 @@ impl SignedOp {
 }
 
 #[allow(dead_code)]
-impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
+impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
     pub fn new(keypair: &'a Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
@@ -158,7 +188,7 @@ impl<'a, T: CRDT<Inner = Value> + DebugView> BaseCRDT<'a, T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -260,10 +290,21 @@ impl Value {
     }
 }
 
-// primitives -> Value
 impl From<bool> for Value {
     fn from(val: bool) -> Self {
         Value::Bool(val)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(val: i64) -> Self {
+        Value::Number(val as f64)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(val: i32) -> Self {
+        Value::Number(val as f64)
     }
 }
 
@@ -287,102 +328,50 @@ impl From<char> for Value {
 
 impl<T> From<Option<T>> for Value
 where
-    T: Into<Value> + Hashable + Clone,
+    T: CRDTNode,
 {
     fn from(val: Option<T>) -> Self {
         match val {
-            Some(x) => x.into(),
+            Some(x) => x.view(),
             None => Value::Null,
         }
     }
 }
 
-impl<T> From<T> for Value
-where
-    T: CRDT<Inner = Value, View = Value>,
-{
-    fn from(value: T) -> Self {
-        value.view()
-    }
-}
-
-impl<T> From<ListCRDT<T>> for Value
-where
-    T: Hashable + Clone + Into<Value>,
-{
-    fn from(value: ListCRDT<T>) -> Self {
-        value.view().into()
-    }
-}
-
-impl<T> From<LWWRegisterCRDT<T>> for Value
-where
-    T: Hashable + Clone + Into<Value>,
-{
-    fn from(value: LWWRegisterCRDT<T>) -> Self {
-        value.view().into()
-    }
-}
-
 impl<T> From<Vec<T>> for Value
 where
-    T: Into<Value> + Hashable + Clone,
+    T: CRDTNode,
 {
     fn from(value: Vec<T>) -> Self {
-        Value::Array(value.iter().map(|x| x.clone().into()).collect())
+        Value::Array(value.iter().map(|x| x.view()).collect())
     }
 }
 
-impl<T> From<HashMap<String, T>> for Value
+pub trait CRDTNodeFromValue: Sized {
+    fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String>;
+}
+
+pub trait IntoCRDTNode<T>: Sized {
+    fn into_node(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String>;
+}
+
+impl<T> IntoCRDTNode<T> for Value
 where
-    T: Into<Value> + Hashable + Clone,
+    T: CRDTNodeFromValue,
 {
-    fn from(value: HashMap<String, T>) -> Self {
-        Value::Object(
-            value
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone().into()))
-                .collect(),
-        )
+    fn into_node(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String> {
+        T::node_from(self, id, path)
     }
 }
 
-/// Both traits below are reflexive as From/Into are reflexive so these are too
-/// Equivalent to [`TryFrom`] except with [`Option`] instead of [`Result`].
-/// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
-pub trait CRDTTerminalFrom<T>: Sized {
-    fn terminal_from(value: T, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String>;
-}
-
-/// Equivalent to [`TryInto`] except with [`Option`] instead of [`Result`].
-/// It takes in a keypair to allow creating new CRDTs from a bare [`Value`]
-pub trait IntoCRDTTerminal<T>: Sized {
-    fn into_terminal(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String>;
-}
-
-/// Equivalent to infallible conversions
-/// Automatically implement [`CRDTTerminalFrom`] for anything that implements [`Into`]
-impl<T, U> CRDTTerminalFrom<U> for T
-where
-    U: Into<T>,
-{
-    fn terminal_from(value: U, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
-        Ok(U::into(value))
+impl CRDTNodeFromValue for Value {
+    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+        Ok(value)
     }
 }
 
-/// CRDTTerminalFrom implies CRDTTerminalFrom
-impl<T, U> IntoCRDTTerminal<U> for T
-where
-    U: CRDTTerminalFrom<T>,
-{
-    fn into_terminal(self, id: AuthorID, path: Vec<PathSegment>) -> Result<U, String> {
-        U::terminal_from(self, id, path)
-    }
-}
-
-impl CRDTTerminalFrom<Value> for bool {
-    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CRDTNodeFromValue for bool {
+    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Bool(x) = value {
             Ok(x)
         } else {
@@ -391,8 +380,8 @@ impl CRDTTerminalFrom<Value> for bool {
     }
 }
 
-impl CRDTTerminalFrom<Value> for f64 {
-    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CRDTNodeFromValue for f64 {
+    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Number(x) = value {
             Ok(x)
         } else {
@@ -401,8 +390,18 @@ impl CRDTTerminalFrom<Value> for f64 {
     }
 }
 
-impl CRDTTerminalFrom<Value> for String {
-    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CRDTNodeFromValue for i64 {
+    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+        if let Value::Number(x) = value {
+            Ok(x as i64)
+        } else {
+            Err(format!("failed to convert {value:?} -> f64"))
+        }
+    }
+}
+
+impl CRDTNodeFromValue for String {
+    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::String(x) = value {
             Ok(x)
         } else {
@@ -411,8 +410,8 @@ impl CRDTTerminalFrom<Value> for String {
     }
 }
 
-impl CRDTTerminalFrom<Value> for char {
-    fn terminal_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CRDTNodeFromValue for char {
+    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::String(x) = value.clone() {
             x.chars().next().ok_or(format!(
                 "failed to convert {value:?} -> char: found a zero-length string"
@@ -423,30 +422,27 @@ impl CRDTTerminalFrom<Value> for char {
     }
 }
 
-impl<T> CRDTTerminalFrom<Value> for LWWRegisterCRDT<T>
+impl<T> CRDTNodeFromValue for LWWRegisterCRDT<T>
 where
-    T: CRDTTerminalFrom<Value> + Clone + Hashable + Display,
+    T: CRDTNode,
 {
-    fn terminal_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
-        let term = value.into_terminal(id, path.clone())?;
+    fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
         let mut crdt = LWWRegisterCRDT::new(id, path);
-        crdt.set(term);
-        println!("{}", crdt.debug_view(0));
+        crdt.set(value);
         Ok(crdt)
     }
 }
 
-impl<T> CRDTTerminalFrom<Value> for ListCRDT<T>
+impl<T> CRDTNodeFromValue for ListCRDT<T>
 where
-    T: CRDTTerminalFrom<Value> + Clone + Hashable,
+    T: CRDTNode,
 {
-    fn terminal_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
+    fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Array(arr) = value {
-            let mut crdt = ListCRDT::new(id, path.clone());
+            let mut crdt = ListCRDT::new(id, path);
             let result: Result<(), String> =
                 arr.into_iter().enumerate().try_for_each(|(i, val)| {
-                    let term = val.into_terminal(id, path.clone())?;
-                    crdt.insert_idx::<Value>(i, term);
+                    crdt.insert_idx(i, val);
                     Ok(())
                 });
             result?;
@@ -462,7 +458,7 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTTerminal, Value, CRDT},
+        json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, Value},
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
@@ -472,7 +468,7 @@ mod test {
     #[test]
     fn test_derive_basic() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Player {
             x: LWWRegisterCRDT<f64>,
             y: LWWRegisterCRDT<f64>,
@@ -487,14 +483,14 @@ mod test {
     #[test]
     fn test_derive_nested() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Position {
             x: LWWRegisterCRDT<f64>,
             y: LWWRegisterCRDT<f64>,
         }
 
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Player {
             pos: Position,
             balance: LWWRegisterCRDT<f64>,
@@ -512,7 +508,7 @@ mod test {
     #[test]
     fn test_lww_ops() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Test {
             a: LWWRegisterCRDT<f64>,
             b: LWWRegisterCRDT<bool>,
@@ -530,10 +526,10 @@ mod test {
         let _2_a_2 = base2.doc.a.set(2.13).sign(&kp2);
         let _2_c_1 = base2.doc.c.set("abc".to_string()).sign(&kp2);
 
-        assert_eq!(base1.doc.a.view(), Some(3.0));
-        assert_eq!(base2.doc.a.view(), Some(2.13));
-        assert_eq!(base1.doc.b.view(), Some(true));
-        assert_eq!(base2.doc.c.view(), Some("abc".to_string()));
+        assert_eq!(base1.doc.a.view(), json!(3.0).into());
+        assert_eq!(base2.doc.a.view(), json!(2.13).into());
+        assert_eq!(base1.doc.b.view(), json!(true).into());
+        assert_eq!(base2.doc.c.view(), json!("abc").into());
 
         assert_eq!(
             base1.doc.view().into_json(),
@@ -572,7 +568,7 @@ mod test {
     #[test]
     fn test_vec_and_map_ops() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Test {
             a: ListCRDT<String>,
         }
@@ -612,14 +608,14 @@ mod test {
     #[test]
     fn test_causal_field_dependency() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Item {
             name: LWWRegisterCRDT<String>,
             soulbound: LWWRegisterCRDT<bool>,
         }
 
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Player {
             inventory: ListCRDT<Item>,
             balance: LWWRegisterCRDT<f64>,
@@ -672,7 +668,7 @@ mod test {
     #[test]
     fn test_2d_grid() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Game {
             grid: ListCRDT<ListCRDT<LWWRegisterCRDT<bool>>>,
         }
@@ -718,7 +714,7 @@ mod test {
     #[test]
     fn test_arb_json() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDT)]
+        #[derive(Clone, CRDTNode)]
         struct Todo {
             reg: LWWRegisterCRDT<Value>,
         }

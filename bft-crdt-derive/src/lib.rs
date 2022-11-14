@@ -47,7 +47,7 @@ pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStre
     .into();
 }
 
-#[proc_macro_derive(CRDT)]
+#[proc_macro_derive(CRDTNode)]
 pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
     // Parse the input tokens into a syntax tree.
     let input = parse_macro_input!(input as DeriveInput);
@@ -77,7 +77,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         ident_literals.push(ident.clone());
                         tys.push(ty.clone());
                         field_impls.push(quote! {
-                            #ident: <#ty as CRDT>::new(
+                            #ident: <#ty as CRDTNode>::new(
                                 id,
                                 #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#str_literal.to_string()))
                             )
@@ -86,15 +86,15 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 }
 
                 let expanded = quote! {
-                    impl #impl_generics #crate_name::json_crdt::CRDTTerminalFrom<#crate_name::json_crdt::Value> for #ident #ty_generics #where_clause {
-                        fn terminal_from(value: #crate_name::json_crdt::Value, id: #crate_name::keypair::AuthorID, path: Vec<#crate_name::op::PathSegment>) -> Result<Self, String> {
+                    impl #impl_generics #crate_name::json_crdt::CRDTNodeFromValue for #ident #ty_generics #where_clause {
+                        fn node_from(value: #crate_name::json_crdt::Value, id: #crate_name::keypair::AuthorID, path: Vec<#crate_name::op::PathSegment>) -> Result<Self, String> {
                             if let #crate_name::json_crdt::Value::Object(mut obj) = value {
                                 Ok(#ident {
                                     path: path.clone(),
                                     id,
                                     #(#ident_literals: obj.remove(#ident_strings)
                                         .unwrap()
-                                        .into_terminal(
+                                        .into_node(
                                             id,
                                             #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#ident_strings.to_string()))
                                         )
@@ -115,11 +115,8 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         }
                     } 
 
-                    impl #impl_generics #crate_name::json_crdt::CRDT for #ident #ty_generics #where_clause {
-                        type Inner = #crate_name::json_crdt::Value;
-                        type View = #crate_name::json_crdt::Value;
-
-                        fn apply(&mut self, op: #crate_name::op::Op<Self::Inner>) {
+                    impl #impl_generics #crate_name::json_crdt::CRDTNode for #ident #ty_generics #where_clause {
+                        fn apply(&mut self, op: #crate_name::op::Op<#crate_name::json_crdt::Value>) {
                             // tried to assign to a struct field directly, invalid
                             let path = op.path.clone();
                             let author = op.id.clone();
@@ -132,6 +129,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                                 let ours = if let #crate_name::op::PathSegment::Field(f) = our_path_segment { Some(f) } else { None };
                                 let theirs = if let #crate_name::op::PathSegment::Field(f) = op_path_segment { Some(f) } else { None };
                                 if ours != theirs {
+                                    #crate_name::debug::debug_path_mismatch(self.path.clone(), op.path.clone());
                                     return;
                                 }
                                 idx += 1;
@@ -147,7 +145,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                             };
                         }
 
-                        fn view(&self) -> Self::View {
+                        fn view(&self) -> #crate_name::json_crdt::Value {
                             let mut view_map = std::collections::HashMap::new();
                             #(view_map.insert(#ident_strings.to_string(), self.#ident_literals.view().into());)*
                             #crate_name::json_crdt::Value::Object(view_map)

@@ -1,11 +1,11 @@
 use bft_json_crdt::{
     keypair::make_author,
     list_crdt::ListCRDT,
-    op::{Hashable, Op, OpID, ROOT_ID},
+    op::{Op, OpID, ROOT_ID}, json_crdt::{CRDTNode, Value},
 };
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
-fn random_op<T: Clone + Hashable>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
+fn random_op<T: CRDTNode>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
     arr.choose(rng).map(|op| op.id).unwrap_or(ROOT_ID)
 }
 
@@ -14,9 +14,9 @@ const TEST_N: usize = 100;
 #[test]
 fn test_list_fuzz_commutative() {
     let mut rng = rand::thread_rng();
-    let mut op_log = Vec::<Op<char>>::new();
-    let mut op_log1 = Vec::<Op<char>>::new();
-    let mut op_log2 = Vec::<Op<char>>::new();
+    let mut op_log = Vec::<Op<Value>>::new();
+    let mut op_log1 = Vec::<Op<Value>>::new();
+    let mut op_log2 = Vec::<Op<Value>>::new();
     let mut l1 = ListCRDT::<char>::new(make_author(1), vec![]);
     let mut l2 = ListCRDT::<char>::new(make_author(2), vec![]);
     let mut chk = ListCRDT::<char>::new(make_author(3), vec![]);
@@ -46,7 +46,7 @@ fn test_list_fuzz_commutative() {
     // apply to each other
     for op in op_log1 {
         l2.apply(op.clone());
-        chk.apply(op);
+        chk.apply(op.into());
     }
     for op in op_log2 {
         l1.apply(op.clone());
@@ -62,8 +62,8 @@ fn test_list_fuzz_commutative() {
     assert_eq!(l2_doc, chk_doc);
 
     // now, allow cross mixing between both
-    let mut op_log1 = Vec::<Op<char>>::new();
-    let mut op_log2 = Vec::<Op<char>>::new();
+    let mut op_log1 = Vec::<Op<Value>>::new();
+    let mut op_log2 = Vec::<Op<Value>>::new();
     for _ in 0..TEST_N {
         let letter1: char = rng.gen_range(b'a'..=b'z') as char;
         let letter2: char = rng.gen_range(b'a'..=b'z') as char;
