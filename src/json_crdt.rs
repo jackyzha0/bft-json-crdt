@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    debug::DebugView,
+    debug::{DebugView, debug_op_on_primitive},
     keypair::{sha256, sign, AuthorID, SignedDigest},
     list_crdt::ListCRDT,
     lww_crdt::LWWRegisterCRDT,
@@ -38,7 +38,7 @@ where
     T: CRDTNodeFromValue + MarkPrimitive + Hashable + Clone,
 {
     fn apply(&mut self, _op: Op<Value>) {
-        unreachable!()
+        debug_op_on_primitive(_op.path);
     }
 
     fn view(&self) -> Value {
@@ -46,7 +46,8 @@ where
     }
 
     fn new(_id: AuthorID, _path: Vec<PathSegment>) -> Self {
-        unreachable!()
+        debug_op_on_primitive(_path);
+        Default::default() 
     }
 }
 

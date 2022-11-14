@@ -49,6 +49,17 @@ pub fn debug_path_mismatch(_our_path: Vec<PathSegment>, _op_path: Vec<PathSegmen
     }
 }
 
+pub fn debug_op_on_primitive(_op_path: Vec<PathSegment>) {
+    #[cfg(feature = "logging-base")]
+    {
+        println!(
+            "  {} this is an error, ignoring op.\nop path: {}",
+            "trying to apply() on a primitive!".red(),
+            print_path(_op_path),
+        );
+    }
+}
+
 #[cfg(feature = "logging-base")]
 fn display_author(author: AuthorID) -> String {
     let [r, g, b] = RandomColor::new()
@@ -71,13 +82,13 @@ impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
         println!("document is now:\n{}", self.doc.debug_view(0));
     }
 
-    pub fn log_try_apply(&self, op: &SignedOp) {
+    pub fn log_try_apply(&self, _op: &SignedOp) {
         #[cfg(feature = "logging-json")]
         println!(
             "{} trying to apply operation {} from {}",
             display_author(self.id),
-            &print_hex(&op.signed_digest)[..6],
-            display_author(op.inner.author())
+            &print_hex(&_op.signed_digest)[..6],
+            display_author(_op.inner.author())
         );
     }
 

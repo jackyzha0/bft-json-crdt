@@ -1,6 +1,6 @@
 use crate::debug::DebugView;
 use crate::json_crdt::{CRDTNode, Value};
-use crate::op::{print_path, Op, PathSegment, SequenceNumber};
+use crate::op::{print_path, Op, PathSegment, SequenceNumber, join_path};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -40,7 +40,7 @@ where
     }
 
     pub fn set<U: Into<Value>>(&mut self, content: U) -> Op<Value> {
-        let op = Op::new(
+        let mut op = Op::new(
             self.value.id,
             self.our_id,
             self.our_seq() + 1,
@@ -48,6 +48,9 @@ where
             Some(content.into()),
             self.path.to_owned(),
         );
+        let new_id = op.id;
+        let new_path = join_path(self.path.to_owned(), PathSegment::Index(new_id));
+        op.path = new_path;
         self.apply(op.clone());
         op
     }
