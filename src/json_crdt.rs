@@ -25,8 +25,9 @@ pub trait CRDTNode: CRDTNodeFromValue + Hashable + Clone {
 }
 
 /// Enum representing possible outcomes of applying an operation to a CRDT
+#[derive(Debug, PartialEq)]
 pub enum OpState {
-    /// Operation applied successfully 
+    /// Operation applied successfully
     Ok,
     /// Tried to apply an operation to a non-CRDT primative (i.e. f64, bool, etc.)
     /// If you would like a mutable primitive, wrap it in a [`LWWRegisterCRDT`]
@@ -52,12 +53,6 @@ pub enum OpState {
     /// We have not received all of the causal dependencies of this operation. It has been queued
     /// up and will be executed when its causal dependencies have been delivered
     MissingCausalDependencies,
-}
-
-impl OpState {
-    pub fn is_ok(&self) ->  bool {
-        matches!(self, Self::Ok)
-    }
 }
 
 /// implement CRDTNode for non-CRDTs
@@ -219,7 +214,7 @@ impl<T: CRDTNode + DebugView> BaseCRDT<T> {
                 self.apply(dependent);
             }
         }
-        status 
+        status
     }
 }
 
@@ -493,7 +488,7 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, Value},
+        json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, Value, OpState},
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
@@ -583,11 +578,11 @@ mod test {
             })
         );
 
-        base2.apply(_1_a_1);
-        base2.apply(_1_b_1);
-        base1.apply(_2_a_1);
-        base1.apply(_2_a_2);
-        base1.apply(_2_c_1);
+        assert_eq!(base2.apply(_1_a_1), OpState::Ok);
+        assert_eq!(base2.apply(_1_b_1), OpState::Ok);
+        assert_eq!(base1.apply(_2_a_1), OpState::Ok);
+        assert_eq!(base1.apply(_2_a_2), OpState::Ok);
+        assert_eq!(base1.apply(_2_c_1), OpState::Ok);
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -633,10 +628,10 @@ mod test {
             })
         );
 
-        base2.apply(_1b);
-        base2.apply(_1a);
-        base1.apply(_2d);
-        base1.apply(_2c);
+        assert_eq!(base2.apply(_1b), OpState::MissingCausalDependencies);
+        assert_eq!(base2.apply(_1a), OpState::Ok);
+        assert_eq!(base1.apply(_2d), OpState::Ok);
+        assert_eq!(base1.apply(_2c), OpState::Ok);
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }
 
@@ -694,9 +689,9 @@ mod test {
         );
 
         // do it completely out of order
-        base2.apply(_new_inventory_item);
-        base2.apply(_spend_money);
-        base2.apply(_add_money);
+        assert_eq!(base2.apply(_new_inventory_item), OpState::MissingCausalDependencies);
+        assert_eq!(base2.apply(_spend_money), OpState::MissingCausalDependencies);
+        assert_eq!(base2.apply(_add_money), OpState::Ok);
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }
 
@@ -719,8 +714,8 @@ mod test {
         let construct1 = base1.doc.grid.insert_idx(0, row0).sign(&kp1);
         let construct2 = base1.doc.grid.insert_idx(1, row1).sign(&kp1);
 
-        base2.apply(construct1);
-        base2.apply(construct2.clone());
+        assert_eq!(base2.apply(construct1), OpState::Ok);
+        assert_eq!(base2.apply(construct2.clone()), OpState::Ok);
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -732,8 +727,8 @@ mod test {
 
         let set1 = base1.doc.grid[0][0].set(false).sign(&kp1);
         let set2 = base2.doc.grid[1][1].set(false).sign(&kp2);
-        base1.apply(set2);
-        base2.apply(set1);
+        assert_eq!(base1.apply(set2), OpState::Ok);
+        assert_eq!(base2.apply(set1), OpState::Ok);
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -824,7 +819,7 @@ mod test {
         // set nested
         let mut list_view: Value = crdt.doc.strct.view().into();
         assert_eq!(list_view, json!([]).into());
-        
+
         // only keeps actual numbers
         let list: Value = json!({"list": [0, 123, -0.45, "char", []]}).into();
         crdt.doc.strct.insert_idx(0, list);

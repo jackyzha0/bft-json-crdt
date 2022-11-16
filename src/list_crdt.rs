@@ -363,7 +363,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{keypair::make_author, list_crdt::ListCRDT, op::ROOT_ID};
+    use crate::{keypair::make_author, list_crdt::ListCRDT, op::ROOT_ID, json_crdt::OpState};
 
     #[test]
     fn test_list_simple() {
@@ -380,7 +380,7 @@ mod test {
         let mut list = ListCRDT::<i64>::new(make_author(1), vec![]);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
-            list.apply(op.clone());
+            assert_eq!(list.apply(op.clone()), OpState::Ok);
         }
         assert_eq!(list.view(), vec![1]);
     }
@@ -410,18 +410,18 @@ mod test {
         let mut list1 = ListCRDT::<char>::new(make_author(1), vec![]);
         let mut list2 = ListCRDT::new(make_author(2), vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
-        list2.apply(_1_a.clone());
+        assert_eq!(list2.apply(_1_a.clone()), OpState::Ok);
         let _2_b = list2.insert(_1_a.id, 'b');
-        list1.apply(_2_b.clone());
+        assert_eq!(list1.apply(_2_b.clone()), OpState::Ok);
 
         let _2_d = list2.insert(ROOT_ID, 'd');
         let _2_y = list2.insert(_2_b.id, 'y');
         let _1_x = list1.insert(_2_b.id, 'x');
 
         // create artificial delay, then apply out of order
-        list2.apply(_1_x);
-        list1.apply(_2_y);
-        list1.apply(_2_d);
+        assert_eq!(list2.apply(_1_x), OpState::Ok);
+        assert_eq!(list1.apply(_2_y), OpState::Ok);
+        assert_eq!(list1.apply(_2_d), OpState::Ok);
 
         assert_eq!(list1.view(), vec!['d', 'a', 'b', 'y', 'x']);
         assert_eq!(list1.view(), list2.view());
@@ -432,11 +432,11 @@ mod test {
         let mut list1 = ListCRDT::<char>::new(make_author(1), vec![]);
         let mut list2 = ListCRDT::new(make_author(2), vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
-        list2.apply(_1_a.clone());
+        assert_eq!(list2.apply(_1_a.clone()), OpState::Ok);
         let _2_b = list2.insert(_1_a.id, 'b');
         let del_1_a = list1.delete(_1_a.id);
-        list1.apply(_2_b);
-        list2.apply(del_1_a);
+        assert_eq!(list1.apply(_2_b), OpState::Ok);
+        assert_eq!(list2.apply(del_1_a), OpState::Ok);
 
         assert_eq!(list1.view(), vec!['b']);
         assert_eq!(list1.view(), list2.view());

@@ -138,7 +138,7 @@ where
 #[cfg(test)]
 mod test {
     use super::LWWRegisterCRDT;
-    use crate::keypair::make_author;
+    use crate::{keypair::make_author, json_crdt::OpState};
 
     #[test]
     fn test_lww_simple() {
@@ -158,9 +158,9 @@ mod test {
         let _b = register1.set('b');
         let _c = register2.set('c');
         assert_eq!(register2.view(), Some('c'));
-        register1.apply(_c);
-        register2.apply(_b);
-        register2.apply(_a);
+        assert_eq!(register1.apply(_c), OpState::Ok);
+        assert_eq!(register2.apply(_b), OpState::Ok);
+        assert_eq!(register2.apply(_a), OpState::Ok);
         assert_eq!(register1.view(), Some('b'));
         assert_eq!(register2.view(), Some('b'));
     }
@@ -170,7 +170,7 @@ mod test {
         let mut register = LWWRegisterCRDT::new(make_author(1), vec![]);
         let op = register.set(1);
         for _ in 1..10 {
-            register.apply(op.clone());
+            assert_eq!(register.apply(op.clone()), OpState::Ok);
         }
         assert_eq!(register.view(), Some(1));
     }
@@ -181,12 +181,12 @@ mod test {
         let mut register2 = LWWRegisterCRDT::new(make_author(2), vec![]);
         let _a = register1.set('a');
         let _b = register2.set('b');
-        register1.apply(_b);
-        register2.apply(_a);
+        assert_eq!(register1.apply(_b), OpState::Ok);
+        assert_eq!(register2.apply(_a), OpState::Ok);
         let _c = register1.set('c');
         let _d = register2.set('d');
-        register2.apply(_c);
-        register1.apply(_d);
+        assert_eq!(register2.apply(_c), OpState::Ok);
+        assert_eq!(register1.apply(_d), OpState::Ok);
         assert_eq!(register1.view(), register2.view());
         assert_eq!(register1.view(), Some('c'));
     }

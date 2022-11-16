@@ -1,8 +1,9 @@
 use bft_json_crdt::{
-    json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTNode, CRDTNode},
+    json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, OpState},
     keypair::make_keypair,
     list_crdt::ListCRDT,
-    op::{Op, ROOT_ID, PathSegment}, lww_crdt::LWWRegisterCRDT,
+    lww_crdt::LWWRegisterCRDT,
+    op::{Op, PathSegment, ROOT_ID},
 };
 use serde_json::json;
 
@@ -43,13 +44,13 @@ fn test_equivocation() {
     fake_op_seq.inner.seq = 99;
     fake_op_seq.inner.is_deleted = true;
 
-    crdt.apply(fake_op.clone());
-    crdt.apply(fake_op_seq.clone());
+    assert_eq!(crdt.apply(fake_op.clone()), OpState::ErrHashMismatch);
+    assert_eq!(crdt.apply(fake_op_seq.clone()), OpState::ErrHashMismatch);
 
-    testcrdt.apply(fake_op_seq);
-    testcrdt.apply(fake_op);
-    testcrdt.apply(_a);
-    testcrdt.apply(_b);
+    assert_eq!(testcrdt.apply(fake_op_seq), OpState::ErrHashMismatch);
+    assert_eq!(testcrdt.apply(fake_op), OpState::ErrHashMismatch);
+    assert_eq!(testcrdt.apply(_a), OpState::Ok);
+    assert_eq!(testcrdt.apply(_b), OpState::Ok);
 
     // make sure it doesnt accept either of the fake operations
     assert_eq!(crdt.doc.list.view(), vec!['a', 'b']);
@@ -70,7 +71,7 @@ fn test_forge_update() {
         origin: _a.inner.id,
         author: crdt.doc.id, // pretend to be the owner of list
         content: Some('b'),
-        path: vec![],
+        path: vec![PathSegment::Field("list".to_string())],
         seq: 1,
         is_deleted: false,
         id: ROOT_ID, // placeholder, to be generated
@@ -81,9 +82,9 @@ fn test_forge_update() {
     op.id = op.hash_to_id(); // we can't tell from op.hash() alone whether this op is valid or not
     let signed = op.sign(&fake_key);
 
-    crdt.apply(signed.clone());
-    testcrdt.apply(signed);
-    testcrdt.apply(_a);
+    assert_eq!(crdt.apply(signed.clone()), OpState::ErrHashMismatch);
+    assert_eq!(testcrdt.apply(signed), OpState::ErrHashMismatch);
+    assert_eq!(testcrdt.apply(_a), OpState::Ok);
 
     // make sure it doesnt accept fake operation
     assert_eq!(crdt.doc.list.view(), vec!['a']);
@@ -92,13 +93,13 @@ fn test_forge_update() {
 #[add_crdt_fields]
 #[derive(Clone, CRDTNode)]
 struct Nested {
-    a: Nested2
+    a: Nested2,
 }
 
 #[add_crdt_fields]
 #[derive(Clone, CRDTNode)]
 struct Nested2 {
-    b: LWWRegisterCRDT<bool>
+    b: LWWRegisterCRDT<bool>,
 }
 
 #[test]
@@ -110,13 +111,22 @@ fn test_path_update() {
     let mut _true = crdt.doc.a.b.set(true);
     _true.path = vec![PathSegment::Field("x".to_string())];
     let mut _false = crdt.doc.a.b.set(false);
-    _false.path = vec![PathSegment::Field("a".to_string()), PathSegment::Index(_false.id)];
+    _false.path = vec![
+        PathSegment::Field("a".to_string()),
+        PathSegment::Index(_false.id),
+    ];
 
     let signedtrue = _true.sign(&key);
     let signedfalse = _false.sign(&key);
+    let mut signedfalsefakepath = signedfalse.clone();
+    signedfalsefakepath.inner.path = vec![
+        PathSegment::Field("a".to_string()),
+        PathSegment::Field("b".to_string()),
+    ];
 
-    testcrdt.apply(signedtrue);
-    testcrdt.apply(signedfalse);
+    assert_eq!(testcrdt.apply(signedtrue), OpState::ErrPathMismatch);
+    assert_eq!(testcrdt.apply(signedfalse), OpState::ErrPathMismatch);
+    assert_eq!(testcrdt.apply(signedfalsefakepath), OpState::ErrDigestMismatch);
 
     // make sure it doesnt accept fake operation
     assert_eq!(crdt.doc.a.b.view(), json!(false).into());
