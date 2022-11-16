@@ -54,6 +54,12 @@ pub enum OpState {
     MissingCausalDependencies,
 }
 
+impl OpState {
+    pub fn is_ok(&self) ->  bool {
+        matches!(self, Self::Ok)
+    }
+}
+
 /// implement CRDTNode for non-CRDTs
 pub trait MarkPrimitive: Into<Value> + Default {}
 impl MarkPrimitive for bool {}
@@ -81,10 +87,8 @@ where
     }
 }
 
-#[allow(dead_code)]
-pub struct BaseCRDT<'a, T: CRDTNode> {
+pub struct BaseCRDT<T: CRDTNode> {
     pub id: AuthorID,
-    keypair: &'a Ed25519KeyPair,
     pub doc: T,
 
     /// In a real world scenario, this would be a hashgraph
@@ -173,25 +177,24 @@ impl SignedOp {
 }
 
 #[allow(dead_code)]
-impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
-    pub fn new(keypair: &'a Ed25519KeyPair) -> Self {
+impl<T: CRDTNode + DebugView> BaseCRDT<T> {
+    pub fn new(keypair: &Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
             id,
-            keypair,
             doc: T::new(id, vec![]),
             received: HashSet::new(),
             message_q: HashMap::new(),
         }
     }
 
-    pub fn apply(&mut self, op: SignedOp) {
+    pub fn apply(&mut self, op: SignedOp) -> OpState {
         self.log_try_apply(&op);
 
         #[cfg(feature = "bft")]
         if !op.is_valid_digest() {
             self.debug_digest_failure(op);
-            return;
+            return OpState::ErrDigestMismatch;
         }
 
         let op_id = op.signed_digest;
@@ -200,14 +203,14 @@ impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
                 if !self.received.contains(origin) {
                     self.log_missing_causal_dep(origin);
                     self.message_q.entry(*origin).or_default().push(op);
-                    return;
+                    return OpState::MissingCausalDependencies;
                 }
             }
         }
 
         // apply all of its causal dependents if there are any
         self.log_actually_apply(&op);
-        self.doc.apply(op.inner);
+        let status = self.doc.apply(op.inner);
         self.debug_view();
         self.received.insert(op_id);
         let dependent_queue = self.message_q.remove(&op_id);
@@ -216,6 +219,7 @@ impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
                 self.apply(dependent);
             }
         }
+        status 
     }
 }
 
@@ -716,7 +720,7 @@ mod test {
         let construct2 = base1.doc.grid.insert_idx(1, row1).sign(&kp1);
 
         base2.apply(construct1);
-        base2.apply(construct2);
+        base2.apply(construct2.clone());
 
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
         assert_eq!(
@@ -736,6 +740,23 @@ mod test {
             base1.doc.view().into_json(),
             json!({
                 "grid": [[false, false], [false, false]]
+            })
+        );
+
+        let topright = base1.doc.grid[0].id_at(1).unwrap();
+        base1.doc.grid[0].delete(topright);
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!({
+                "grid": [[false], [false, false]]
+            })
+        );
+
+        base1.doc.grid.delete(construct2.id());
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!({
+                "grid": [[false]]
             })
         );
     }
@@ -781,7 +802,7 @@ mod test {
         #[add_crdt_fields]
         #[derive(Clone, CRDTNode)]
         struct Nested {
-            list: ListCRDT<i64>,
+            list: ListCRDT<f64>,
         }
 
         #[add_crdt_fields]
@@ -801,13 +822,13 @@ mod test {
         assert_eq!(crdt.doc.reg.view(), json!(true).into());
 
         // set nested
-        let empty_list: Value = json!([]).into();
         let mut list_view: Value = crdt.doc.strct.view().into();
         assert_eq!(list_view, json!([]).into());
-        crdt.doc.strct.insert_idx(0, empty_list);
-
-        // can't have empty
+        
+        // only keeps actual numbers
+        let list: Value = json!({"list": [0, 123, -0.45, "char", []]}).into();
+        crdt.doc.strct.insert_idx(0, list);
         list_view = crdt.doc.strct.view().into();
-        assert_eq!(list_view, json!([]).into());
+        assert_eq!(list_view, json!([{ "list": [0, 123, -0.45]}]).into());
     }
 }

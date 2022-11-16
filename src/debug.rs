@@ -76,7 +76,7 @@ pub trait DebugView {
     fn debug_view(&self, indent: usize) -> String;
 }
 
-impl<'a, T: CRDTNode + DebugView> BaseCRDT<'a, T> {
+impl<T: CRDTNode + DebugView> BaseCRDT<T> {
     pub fn debug_view(&self) {
         #[cfg(feature = "logging-json")]
         println!("document is now:\n{}", self.doc.debug_view(0));

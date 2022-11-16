@@ -2,8 +2,9 @@ use bft_json_crdt::{
     json_crdt::{add_crdt_fields, BaseCRDT, IntoCRDTNode, CRDTNode},
     keypair::make_keypair,
     list_crdt::ListCRDT,
-    op::{Op, ROOT_ID}, lww_crdt::LWWRegisterCRDT,
+    op::{Op, ROOT_ID, PathSegment}, lww_crdt::LWWRegisterCRDT,
 };
+use serde_json::json;
 
 // What is potentially Byzantine behaviour?
 // 1. send valid updates
@@ -23,6 +24,71 @@ struct ListExample {
     list: ListCRDT<char>,
 }
 
+// case 2a + 2b
+#[test]
+fn test_equivocation() {
+    let key = make_keypair();
+    let testkey = make_keypair();
+    let mut crdt = BaseCRDT::<ListExample>::new(&key);
+    let mut testcrdt = BaseCRDT::<ListExample>::new(&testkey);
+    let _a = crdt.doc.list.insert(ROOT_ID, 'a').sign(&key);
+    let _b = crdt.doc.list.insert(_a.id(), 'b').sign(&key);
+
+    // make a fake operation with same id as _b but different content
+    let mut fake_op = _b.clone();
+    fake_op.inner.content = Some('c'.into());
+
+    // also try modifying the sequence number
+    let mut fake_op_seq = _b.clone();
+    fake_op_seq.inner.seq = 99;
+    fake_op_seq.inner.is_deleted = true;
+
+    crdt.apply(fake_op.clone());
+    crdt.apply(fake_op_seq.clone());
+
+    testcrdt.apply(fake_op_seq);
+    testcrdt.apply(fake_op);
+    testcrdt.apply(_a);
+    testcrdt.apply(_b);
+
+    // make sure it doesnt accept either of the fake operations
+    assert_eq!(crdt.doc.list.view(), vec!['a', 'b']);
+    assert_eq!(crdt.doc.list.view(), testcrdt.doc.list.view());
+}
+
+// case 2c
+#[test]
+fn test_forge_update() {
+    let key = make_keypair();
+    let testkey = make_keypair();
+    let mut crdt = BaseCRDT::<ListExample>::new(&key);
+    let mut testcrdt = BaseCRDT::<ListExample>::new(&testkey);
+    let _a = crdt.doc.list.insert(ROOT_ID, 'a').sign(&key);
+
+    let fake_key = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id
+    let mut op = Op {
+        origin: _a.inner.id,
+        author: crdt.doc.id, // pretend to be the owner of list
+        content: Some('b'),
+        path: vec![],
+        seq: 1,
+        is_deleted: false,
+        id: ROOT_ID, // placeholder, to be generated
+    };
+
+    // this is a completely valid hash and digest, just signed by the wrong person
+    // as keypair.public != list.public
+    op.id = op.hash_to_id(); // we can't tell from op.hash() alone whether this op is valid or not
+    let signed = op.sign(&fake_key);
+
+    crdt.apply(signed.clone());
+    testcrdt.apply(signed);
+    testcrdt.apply(_a);
+
+    // make sure it doesnt accept fake operation
+    assert_eq!(crdt.doc.list.view(), vec!['a']);
+}
+
 #[add_crdt_fields]
 #[derive(Clone, CRDTNode)]
 struct Nested {
@@ -35,89 +101,24 @@ struct Nested2 {
     b: LWWRegisterCRDT<bool>
 }
 
-// case 2a + 2b
 #[test]
-fn test_equivocation() {
+fn test_path_update() {
     let key = make_keypair();
-    let mut crdt = BaseCRDT::<ListExample>::new(&key);
-    let _a = crdt.doc.list.insert(ROOT_ID, 'a').sign(&key);
-    let _b = crdt.doc.list.insert(_a.id(), 'b').sign(&key);
+    let testkey = make_keypair();
+    let mut crdt = BaseCRDT::<Nested>::new(&key);
+    let mut testcrdt = BaseCRDT::<Nested>::new(&testkey);
+    let mut _true = crdt.doc.a.b.set(true);
+    _true.path = vec![PathSegment::Field("x".to_string())];
+    let mut _false = crdt.doc.a.b.set(false);
+    _false.path = vec![PathSegment::Field("a".to_string()), PathSegment::Index(_false.id)];
 
-    // make a fake operation with same id as _b but different content
-    let mut fake_op = _b.clone();
-    fake_op.inner.content = Some('c'.into());
+    let signedtrue = _true.sign(&key);
+    let signedfalse = _false.sign(&key);
 
-    // also try modifying the sequence number
-    let mut fake_op_seq = _b;
-    fake_op_seq.inner.seq = 99;
-    fake_op_seq.inner.is_deleted = true;
-
-    crdt.apply(fake_op);
-    crdt.apply(fake_op_seq);
-
-    // make sure it doesnt accept either of the fake operations
-    assert_eq!(crdt.doc.list.view(), vec!['a', 'b']);
-}
-
-// case 2c
-#[test]
-fn test_forge_update() {
-    let key = make_keypair();
-    let mut crdt = BaseCRDT::<ListExample>::new(&key);
-    let _a = crdt.doc.list.insert(ROOT_ID, 'a');
-
-    let keypair = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id
-    let mut op = Op {
-        origin: _a.id,
-        author: crdt.doc.list.our_id, // pretend to be the owner of list
-        content: Some('b'),
-        path: vec![],
-        seq: 1,
-        is_deleted: false,
-        id: ROOT_ID, // placeholder, to be generated
-    };
-
-    // this is a completely valid hash and digest, just signed by the wrong person
-    // as keypair.public != list.public
-    op.id = op.hash_to_id(); // we can't tell from op.hash() alone whether this op is valid or not
-    let signed = op.sign(&keypair);
-
-    crdt.apply(signed);
+    testcrdt.apply(signedtrue);
+    testcrdt.apply(signedfalse);
 
     // make sure it doesnt accept fake operation
-    assert_eq!(crdt.doc.list.view(), vec!['a']);
+    assert_eq!(crdt.doc.a.b.view(), json!(false).into());
+    assert_eq!(testcrdt.doc.a.b.view(), json!(null).into());
 }
-
-// #[test]
-// fn test_different_base() {
-//
-// }
-//
-// #[test]
-// fn test_path_update() {
-//     let key = make_keypair();
-//     let mut crdt = BaseCRDT::<Nested>::new(&key);
-//     let _a = crdt.doc.a.b.set('a');
-//     let _true = crdt.doc.a.b.set(true);
-//
-//     let keypair = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id
-//     let mut op = Op {
-//         origin: _a.id,
-//         author: crdt.doc.list.our_id, // pretend to be the owner of list
-//         content: Some('b'),
-//         path: vec![],
-//         seq: 1,
-//         is_deleted: false,
-//         id: ROOT_ID, // placeholder, to be generated
-//     };
-//
-//     // this is a completely valid hash and digest, just signed by the wrong person
-//     // as keypair.public != list.public
-//     op.id = op.hash_to_id(); // we can't tell from op.hash() alone whether this op is valid or not
-//     let signed = op.sign(&keypair);
-//
-//     crdt.apply(signed);
-//
-//     // make sure it doesnt accept fake operation
-//     assert_eq!(crdt.doc.list.view(), vec!['a']);
-// }

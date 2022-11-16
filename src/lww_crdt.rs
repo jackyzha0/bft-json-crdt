@@ -12,7 +12,7 @@ pub struct LWWRegisterCRDT<T>
 where
     T: CRDTNode,
 {
-    pub our_id: AuthorID,
+    our_id: AuthorID,
     pub path: Vec<PathSegment>,
     value: Op<T>,
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
@@ -89,7 +89,7 @@ where
         self.logical_clocks.insert(author, seq);
         self.highest_seq = max(self.highest_seq, seq);
         self.logical_clocks.insert(self.our_id, self.highest_seq);
-        return OpState::Ok;
+        OpState::Ok
     }
 
     fn view(&self) -> Option<T> {

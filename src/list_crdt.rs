@@ -20,7 +20,7 @@ where
     pub(crate) ops: Vec<Op<T>>,
 
     /// Public key for this node
-    pub our_id: AuthorID,
+    our_id: AuthorID,
 
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
@@ -94,6 +94,19 @@ where
         }
         panic!("index {idx} out of range (length of {i})")
     }
+    
+    pub fn id_at(&self, idx: usize) -> Option<OpID> {
+        let mut i = 0;
+        for op in &self.ops {
+            if !op.is_deleted {
+                if idx == i {
+                    return Some(op.id);
+                }
+                i += 1;
+            }
+        }
+        None
+    } 
 
     /// Mark a node as deleted. Will panic if the node doesn't exist
     pub fn delete(&mut self, id: OpID) -> Op<Value> {
