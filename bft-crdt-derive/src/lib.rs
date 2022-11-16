@@ -9,6 +9,7 @@ use syn::{
     Data, DeriveInput, Field, Fields, ItemStruct, LitStr, Type
 };
 
+/// Helper to get tokenstream representing the parent crate
 fn get_crate_name() -> TokenStream {
     let cr8 = crate_name("bft-json-crdt")
         .unwrap_or(FoundCrate::Itself);
@@ -21,7 +22,7 @@ fn get_crate_name() -> TokenStream {
     }
 }
 
-// creates a keypair and path var on a given struct
+/// Proc macro to insert a keypair and path field on a given struct
 #[proc_macro_attribute]
 pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStream {
     let mut input = parse_macro_input!(input as ItemStruct);
@@ -47,13 +48,14 @@ pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStre
     .into();
 }
 
+/// Proc macro to automatically derive the CRDTNode trait
 #[proc_macro_derive(CRDTNode)]
 pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
-    // Parse the input tokens into a syntax tree.
+    // parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
     let crate_name = get_crate_name();
 
-    // Used in the quasi-quotation below as `#name`.
+    // used in the quasi-quotation below as `#name`
     let ident = input.ident;
     let ident_str = LitStr::new(&*ident.to_string(), ident.span());
 
@@ -65,12 +67,13 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 let mut ident_literals = vec![];
                 let mut ident_strings = vec![];
                 let mut tys = vec![];
+                // parse all named fields
                 for field in &fields.named {
                     let ident = field.ident.as_ref().expect("Failed to get struct field identifier");
                     if ident != "path" && ident != "id" {
                         let ty = match &field.ty {
                             Type::Path(t) => t.to_token_stream(),
-                            _ => return quote_spanned! { field.span() => compile_error!("Field should be a primitive or struct which implements CRDT") }.into(),
+                            _ => return quote_spanned! { field.span() => compile_error!("Field should be a primitive or struct which implements CRDTNode") }.into(),
                         };
                         let str_literal = LitStr::new(&*ident.to_string(), ident.span());
                         ident_strings.push(str_literal.clone());
@@ -119,15 +122,12 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         fn apply(&mut self, op: #crate_name::op::Op<#crate_name::json_crdt::Value>) -> #crate_name::json_crdt::OpState {
                             let path = op.path.clone();
                             let author = op.id.clone();
-
-                            // ensure subpath
                             if !#crate_name::op::ensure_subpath(&self.path, &op.path) {
                                 #crate_name::debug::debug_path_mismatch(self.path.to_owned(), op.path);
                                 return #crate_name::json_crdt::OpState::ErrPathMismatch;
                             }
 
                             if self.path.len() == op.path.len() {
-                                // can't directly assign to struct
                                 return #crate_name::json_crdt::OpState::ErrApplyOnStruct; 
                             } else {
                                 let idx = self.path.len();

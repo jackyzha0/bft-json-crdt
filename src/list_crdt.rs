@@ -1,6 +1,6 @@
 use crate::{
     debug::debug_path_mismatch,
-    json_crdt::{CRDTNode, Value, OpState},
+    json_crdt::{CRDTNode, OpState, Value},
     keypair::AuthorID,
     op::*,
 };
@@ -11,27 +11,23 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+/// An RGA-like list CRDT that can store a CRDT-like datatype
 #[derive(Clone)]
 pub struct ListCRDT<T>
 where
     T: CRDTNode,
 {
-    /// List of all the operations we know of
-    pub(crate) ops: Vec<Op<T>>,
-
     /// Public key for this node
-    our_id: AuthorID,
-
+    pub our_id: AuthorID,
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
-
+    /// List of all the operations we know of
+    ops: Vec<Op<T>>,
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
     message_q: HashMap<OpID, Vec<Op<T>>>,
-
     /// Keeps track of the latest document version we know for each peer
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
-
     /// Highest document version we've seen
     highest_seq: SequenceNumber,
 }
@@ -40,10 +36,8 @@ impl<T> ListCRDT<T>
 where
     T: CRDTNode,
 {
-    /// Create a new List CRDT with the given AuthorID.
-    /// AuthorID should be unique.
+    /// Create a new List CRDT with the given [`AuthorID`] (it should be unique)
     pub fn new(id: AuthorID, path: Vec<PathSegment>) -> ListCRDT<T> {
-        // initialize other fields
         let ops = vec![Op::make_root()];
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
@@ -64,8 +58,6 @@ where
 
     /// Locally insert some content causally after the given operation
     pub fn insert<U: Into<Value>>(&mut self, after: OpID, content: U) -> Op<Value> {
-        // first, make an op that has no path
-        // we need to know the op ID before adding a path segment for the subelement
         let mut op = Op::new(
             after,
             self.our_id,
@@ -74,14 +66,16 @@ where
             Some(content.into()),
             self.path.to_owned(),
         );
-        let new_id = op.id;
-        let new_path = join_path(self.path.to_owned(), PathSegment::Index(new_id));
+
+        // we need to know the op ID before setting the path as [`PathSegment::Index`] requires an
+        // [`OpID`]
+        let new_path = join_path(self.path.to_owned(), PathSegment::Index(op.id));
         op.path = new_path;
         self.apply(op.clone());
         op
     }
 
-    /// Shorthand function to insert at index locally
+    /// Shorthand function to insert at index locally. Indexing ignores deleted items
     pub fn insert_idx<U: Into<Value> + Clone>(&mut self, idx: usize, content: U) -> Op<Value> {
         let mut i = 0;
         for op in &self.ops {
@@ -94,7 +88,9 @@ where
         }
         panic!("index {idx} out of range (length of {i})")
     }
-    
+
+    /// Shorthand to figure out the OpID of something with a given index.
+    /// Useful for declaring a causal dependency if you didn't create the original
     pub fn id_at(&self, idx: usize) -> Option<OpID> {
         let mut i = 0;
         for op in &self.ops {
@@ -106,9 +102,10 @@ where
             }
         }
         None
-    } 
+    }
 
-    /// Mark a node as deleted. Will panic if the node doesn't exist
+    /// Mark a node as deleted. If the node doesn't exist, it will be stuck
+    /// waiting for that node to be created.
     pub fn delete(&mut self, id: OpID) -> Op<Value> {
         let op = Op::new(
             id,
@@ -128,7 +125,7 @@ where
     }
 
     /// Apply an operation (both local and remote) to this local list CRDT.
-    /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
+    /// Forwards it to a nested CRDT if necessary.
     pub fn apply(&mut self, op: Op<Value>) -> OpState {
         if !op.is_valid_hash() {
             return OpState::ErrHashMismatch;
@@ -138,7 +135,7 @@ where
             return OpState::ErrPathMismatch;
         }
 
-        // haven't reached end yet, navigate
+        // haven't reached end yet, navigate to inner CRDT
         if op.path.len() - 1 > self.path.len() {
             if let Some(PathSegment::Index(op_id)) = op.path.get(self.path.len()) {
                 let op_id = op_id.to_owned();
@@ -179,12 +176,14 @@ where
         let origin_id = self.find_idx(new_op.origin);
 
         if origin_id.is_none() {
-            self.message_q.entry(new_op.origin).or_default().push(new_op);
+            self.message_q
+                .entry(new_op.origin)
+                .or_default()
+                .push(new_op);
             return OpState::MissingCausalDependencies;
         }
 
         let new_op_parent_idx = origin_id.unwrap();
-
 
         // if its a delete operation, we don't need to do much
         self.log_apply(&new_op);
@@ -194,6 +193,7 @@ where
             return OpState::Ok;
         }
 
+        // otherwise, we are in an insert case
         // start looking from right after parent
         // stop when we reach end of document
         let mut i = new_op_parent_idx + 1;
@@ -231,7 +231,7 @@ where
 
         // insert at i
         self.ops.insert(i, new_op);
-        
+
         // update sequence number for sender and for ourselves
         self.logical_clocks.insert(author, seq);
         self.highest_seq = max(self.highest_seq, seq);
@@ -281,6 +281,7 @@ where
     }
 }
 
+/// Allows us to index into a List CRDT like we would with an array
 impl<T> Index<usize> for ListCRDT<T>
 where
     T: CRDTNode,
@@ -300,6 +301,7 @@ where
     }
 }
 
+/// Allows us to mutably index into a List CRDT like we would with an array
 impl<T> IndexMut<usize> for ListCRDT<T>
 where
     T: CRDTNode,
@@ -363,7 +365,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{keypair::make_author, list_crdt::ListCRDT, op::ROOT_ID, json_crdt::OpState};
+    use crate::{json_crdt::OpState, keypair::make_author, list_crdt::ListCRDT, op::ROOT_ID};
 
     #[test]
     fn test_list_simple() {

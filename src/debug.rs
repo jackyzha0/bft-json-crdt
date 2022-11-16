@@ -37,11 +37,21 @@ fn display_op_id<T: CRDTNode>(op: &Op<T>) -> String {
     )
 }
 
+pub fn debug_type_mismatch(_msg: String) {
+    #[cfg(feature = "logging-base")]
+    {
+        println!(
+            "  {}\n  {_msg}",
+            "type mismatch! ignoring this node".red(),
+        );
+    }
+}
+
 pub fn debug_path_mismatch(_our_path: Vec<PathSegment>, _op_path: Vec<PathSegment>) {
     #[cfg(feature = "logging-base")]
     {
         println!(
-            "  {}\ncurrent path: {}\nop path: {}",
+            "  {}\n  current path: {}\n  op path: {}",
             "path mismatch!".red(),
             print_path(_our_path),
             print_path(_op_path),
@@ -53,7 +63,7 @@ pub fn debug_op_on_primitive(_op_path: Vec<PathSegment>) {
     #[cfg(feature = "logging-base")]
     {
         println!(
-            "  {} this is an error, ignoring op.\nop path: {}",
+            "  {} this is an error, ignoring op.\n  op path: {}",
             "trying to apply() on a primitive!".red(),
             print_path(_op_path),
         );

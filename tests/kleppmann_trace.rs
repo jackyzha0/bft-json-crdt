@@ -35,6 +35,9 @@ fn get_trace() -> Trace {
     }
 }
 
+/// Really large test to run Martin Kleppmann's
+/// editing trace over his paper
+/// Data source: https://github.com/automerge/automerge-perf
 #[test]
 fn test_editing_trace() {
     let t = get_trace();
@@ -70,5 +73,4 @@ fn test_editing_trace() {
     let expected = t.final_text;
     assert_eq!(result.len(), expected.len());
     assert_eq!(result, expected);
-    // assert!(false);
 }

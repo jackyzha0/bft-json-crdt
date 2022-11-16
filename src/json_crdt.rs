@@ -19,9 +19,12 @@ use fastcrypto::{
 
 /// Anything that can be nested in a JSON CRDT
 pub trait CRDTNode: CRDTNodeFromValue + Hashable + Clone {
-    fn apply(&mut self, op: Op<Value>) -> OpState;
-    fn view(&self) -> Value;
+    /// Create a new CRDT of this type
     fn new(id: AuthorID, path: Vec<PathSegment>) -> Self;
+    /// Apply an operation to this CRDT, forwarding if necessary
+    fn apply(&mut self, op: Op<Value>) -> OpState;
+    /// Get a JSON representation of the value in this node
+    fn view(&self) -> Value;
 }
 
 /// Enum representing possible outcomes of applying an operation to a CRDT
@@ -55,7 +58,7 @@ pub enum OpState {
     MissingCausalDependencies,
 }
 
-/// implement CRDTNode for non-CRDTs
+/// The following types can be used as a 'terminal' type in CRDTs
 pub trait MarkPrimitive: Into<Value> + Default {}
 impl MarkPrimitive for bool {}
 impl MarkPrimitive for i32 {}
@@ -64,6 +67,9 @@ impl MarkPrimitive for f64 {}
 impl MarkPrimitive for char {}
 impl MarkPrimitive for String {}
 impl MarkPrimitive for Value {}
+
+/// Implement CRDTNode for non-CRDTs
+/// This is a stub implementation so most functions don't do anything/log an error
 impl<T> CRDTNode for T
 where
     T: CRDTNodeFromValue + MarkPrimitive + Hashable + Clone,
@@ -82,27 +88,35 @@ where
     }
 }
 
+/// The base struct for a JSON CRDT. Allows for declaring causal
+/// dependencies across fields. It only accepts messages of [`SignedOp`] for BFT.
 pub struct BaseCRDT<T: CRDTNode> {
+    /// Public key of this CRDT
     pub id: AuthorID,
+
+    /// Internal base CRDT
     pub doc: T,
 
-    /// In a real world scenario, this would be a hashgraph
+    /// In a real world scenario, this would be a proper hashgraph that allows for
+    /// efficient reconciliation of missing dependencies. We naively keep a hashset
+    /// of messages we've seen (represented by their [`SignedDigest`]).
     received: HashSet<SignedDigest>,
     message_q: HashMap<SignedDigest, Vec<SignedOp>>,
 }
 
+/// An [`Op<Value>`] with a few bits of extra metadata
 #[derive(Clone)]
 pub struct SignedOp {
-    /// Effectively [`OpID`] Use this as the ID to figure out what has been delivered already
-    pub author: AuthorID, // author of the op note that this can be different from
-    // author of the inner op as inner op could have been created
+    // Note that this can be different from the author of the inner op as the inner op could have been created
     // by a different person
-    pub signed_digest: SignedDigest, // signed hash using priv key of author
+    author: AuthorID,
+    /// Signed hash using priv key of author. Effectively [`OpID`] Use this as the ID to figure out what has been delivered already
+    pub signed_digest: SignedDigest,
     pub inner: Op<Value>,
+    /// List of causal dependencies
     pub depends_on: Vec<SignedDigest>,
 }
 
-#[allow(dead_code)]
 impl SignedOp {
     pub fn id(&self) -> OpID {
         self.inner.id
@@ -132,6 +146,8 @@ impl SignedOp {
         sha256(fmt_str)
     }
 
+    /// Sign this digest with the given keypair. Shouldn't need to be called manually,
+    /// just use [`SignedOp::from_op`] instead
     fn sign_digest(&mut self, keypair: &Ed25519KeyPair) {
         self.signed_digest = sign(keypair, &self.digest()).sig.to_bytes()
     }
@@ -146,6 +162,7 @@ impl SignedOp {
         }
     }
 
+    /// Sign a normal op and add all the needed metadata
     pub fn from_op<T: CRDTNode>(
         value: Op<T>,
         keypair: &Ed25519KeyPair,
@@ -171,8 +188,11 @@ impl SignedOp {
     }
 }
 
-#[allow(dead_code)]
 impl<T: CRDTNode + DebugView> BaseCRDT<T> {
+    /// Crease a new BaseCRDT of the given type. Multiple BaseCRDTs
+    /// can be created from a single keypair but you are responsible for 
+    /// routing messages to the right BaseCRDT. Usually you should just make a single 
+    /// struct that contains all the state you need
     pub fn new(keypair: &Ed25519KeyPair) -> Self {
         let id = keypair.public().0.to_bytes();
         Self {
@@ -183,6 +203,8 @@ impl<T: CRDTNode + DebugView> BaseCRDT<T> {
         }
     }
 
+    /// Apply a signed operation to this BaseCRDT, verifying integrity and routing to the right
+    /// nested CRDT
     pub fn apply(&mut self, op: SignedOp) -> OpState {
         self.log_try_apply(&op);
 
@@ -203,11 +225,13 @@ impl<T: CRDTNode + DebugView> BaseCRDT<T> {
             }
         }
 
-        // apply all of its causal dependents if there are any
+        // apply
         self.log_actually_apply(&op);
         let status = self.doc.apply(op.inner);
         self.debug_view();
         self.received.insert(op_id);
+        
+        // apply all of its causal dependents if there are any
         let dependent_queue = self.message_q.remove(&op_id);
         if let Some(mut q) = dependent_queue {
             for dependent in q.drain(..) {
@@ -218,6 +242,7 @@ impl<T: CRDTNode + DebugView> BaseCRDT<T> {
     }
 }
 
+/// An enum representing a JSON value
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,
@@ -275,6 +300,8 @@ impl Default for Value {
     }
 }
 
+/// Allow easy conversion to and from serde's JSON format. This allows us to use the [`json!`]
+/// macro
 impl From<Value> for serde_json::Value {
     fn from(value: Value) -> Self {
         match value {
@@ -314,12 +341,12 @@ impl From<serde_json::Value> for Value {
 }
 
 impl Value {
-    #[allow(dead_code)]
-    fn into_json(self) -> serde_json::Value {
+    pub fn into_json(self) -> serde_json::Value {
         self.into()
     }
 }
 
+/// Conversions from primitive types to [`Value`]
 impl From<bool> for Value {
     fn from(val: bool) -> Self {
         Value::Bool(val)
@@ -377,14 +404,17 @@ where
     }
 }
 
+/// Fallibly create a CRDT Node from a JSON Value 
 pub trait CRDTNodeFromValue: Sized {
     fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String>;
 }
 
+/// Fallibly cast a JSON Value into a CRDT Node 
 pub trait IntoCRDTNode<T>: Sized {
     fn into_node(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String>;
 }
 
+/// [`CRDTNodeFromValue`] implies [`IntoCRDTNode<T>`]
 impl<T> IntoCRDTNode<T> for Value
 where
     T: CRDTNodeFromValue,
@@ -394,12 +424,14 @@ where
     }
 }
 
+/// Trivial conversion from Value to Value as CRDTNodeFromValue
 impl CRDTNodeFromValue for Value {
     fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         Ok(value)
     }
 }
 
+/// Conversions from primitives to CRDTs
 impl CRDTNodeFromValue for bool {
     fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Bool(x) = value {
@@ -488,7 +520,7 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, Value, OpState},
+        json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, OpState, Value},
         keypair::make_keypair,
         list_crdt::ListCRDT,
         lww_crdt::LWWRegisterCRDT,
@@ -689,8 +721,14 @@ mod test {
         );
 
         // do it completely out of order
-        assert_eq!(base2.apply(_new_inventory_item), OpState::MissingCausalDependencies);
-        assert_eq!(base2.apply(_spend_money), OpState::MissingCausalDependencies);
+        assert_eq!(
+            base2.apply(_new_inventory_item),
+            OpState::MissingCausalDependencies
+        );
+        assert_eq!(
+            base2.apply(_spend_money),
+            OpState::MissingCausalDependencies
+        );
         assert_eq!(base2.apply(_add_money), OpState::Ok);
         assert_eq!(base1.doc.view().into_json(), base2.doc.view().into_json());
     }

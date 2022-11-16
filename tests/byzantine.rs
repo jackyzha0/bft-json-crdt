@@ -79,7 +79,7 @@ fn test_forge_update() {
 
     // this is a completely valid hash and digest, just signed by the wrong person
     // as keypair.public != list.public
-    op.id = op.hash_to_id(); // we can't tell from op.hash() alone whether this op is valid or not
+    op.id = op.hash_to_id();
     let signed = op.sign(&fake_key);
 
     assert_eq!(crdt.apply(signed.clone()), OpState::ErrHashMismatch);

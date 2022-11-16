@@ -1,21 +1,28 @@
 use crate::debug::DebugView;
-use crate::json_crdt::{CRDTNode, Value, OpState};
-use crate::op::{print_path, Op, PathSegment, SequenceNumber, join_path};
+use crate::json_crdt::{CRDTNode, OpState, Value};
+use crate::op::{join_path, print_path, Op, PathSegment, SequenceNumber};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::keypair::AuthorID;
 
+/// A simple delete-wins, last-writer-wins (LWW) register CRDT.
+/// Basically only for adding support for primitives within a more complex CRDT
 #[derive(Clone)]
 pub struct LWWRegisterCRDT<T>
 where
     T: CRDTNode,
 {
-    our_id: AuthorID,
+    /// Public key for this node
+    pub our_id: AuthorID,
+    /// Path to this CRDT
     pub path: Vec<PathSegment>,
+    /// Internal value of this CRDT. We wrap it in an Op to retain the author/sequence metadata
     value: Op<T>,
+    /// Keeps track of the latest document version we know for each peer
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
+    /// Highest document version we've seen
     highest_seq: SequenceNumber,
 }
 
@@ -23,6 +30,7 @@ impl<T> LWWRegisterCRDT<T>
 where
     T: CRDTNode,
 {
+    /// Create a new register CRDT with the given [`AuthorID`] (it should be unique)
     pub fn new(id: AuthorID, path: Vec<PathSegment>) -> LWWRegisterCRDT<T> {
         let mut logical_clocks = HashMap::new();
         logical_clocks.insert(id, 0);
@@ -35,10 +43,12 @@ where
         }
     }
 
+    /// Get our own sequence number
     pub fn our_seq(&self) -> SequenceNumber {
         *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
+    /// Sets the current value of the register
     pub fn set<U: Into<Value>>(&mut self, content: U) -> Op<Value> {
         let mut op = Op::new(
             self.value.id,
@@ -48,13 +58,16 @@ where
             Some(content.into()),
             self.path.to_owned(),
         );
-        let new_id = op.id;
-        let new_path = join_path(self.path.to_owned(), PathSegment::Index(new_id));
+        
+        // we need to know the op ID before setting the path as [`PathSegment::Index`] requires an
+        // [`OpID`]
+        let new_path = join_path(self.path.to_owned(), PathSegment::Index(op.id));
         op.path = new_path;
         self.apply(op.clone());
         op
     }
 
+    /// Apply an operation (both local and remote) to this local register CRDT.
     pub fn apply(&mut self, op: Op<Value>) -> OpState {
         if !op.is_valid_hash() {
             return OpState::ErrHashMismatch;
@@ -138,7 +151,7 @@ where
 #[cfg(test)]
 mod test {
     use super::LWWRegisterCRDT;
-    use crate::{keypair::make_author, json_crdt::OpState};
+    use crate::{json_crdt::OpState, keypair::make_author};
 
     #[test]
     fn test_lww_simple() {
