@@ -1,5 +1,5 @@
 use crate::debug::DebugView;
-use crate::json_crdt::{CRDTNode, Value};
+use crate::json_crdt::{CRDTNode, Value, OpState};
 use crate::op::{print_path, Op, PathSegment, SequenceNumber, join_path};
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
@@ -55,9 +55,9 @@ where
         op
     }
 
-    pub fn apply(&mut self, op: Op<Value>) {
+    pub fn apply(&mut self, op: Op<Value>) -> OpState {
         if !op.is_valid_hash() {
-            return;
+            return OpState::ErrHashMismatch;
         }
 
         let op: Op<T> = op.into();
@@ -89,6 +89,7 @@ where
         self.logical_clocks.insert(author, seq);
         self.highest_seq = max(self.highest_seq, seq);
         self.logical_clocks.insert(self.our_id, self.highest_seq);
+        return OpState::Ok;
     }
 
     fn view(&self) -> Option<T> {
@@ -100,7 +101,7 @@ impl<T> CRDTNode for LWWRegisterCRDT<T>
 where
     T: CRDTNode,
 {
-    fn apply(&mut self, op: Op<Value>) {
+    fn apply(&mut self, op: Op<Value>) -> OpState {
         self.apply(op.into())
     }
 

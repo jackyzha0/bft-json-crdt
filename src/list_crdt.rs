@@ -1,6 +1,6 @@
 use crate::{
     debug::debug_path_mismatch,
-    json_crdt::{CRDTNode, Value},
+    json_crdt::{CRDTNode, Value, OpState},
     keypair::AuthorID,
     op::*,
 };
@@ -116,15 +116,13 @@ where
 
     /// Apply an operation (both local and remote) to this local list CRDT.
     /// Does a bit of bookkeeping on struct variables like updating logical clocks, etc.
-    pub fn apply(&mut self, op: Op<Value>) {
+    pub fn apply(&mut self, op: Op<Value>) -> OpState {
         if !op.is_valid_hash() {
-            return;
+            return OpState::ErrHashMismatch;
         }
 
-        // make sure we are on a subpath
         if !ensure_subpath(&self.path, &op.path) {
-            debug_path_mismatch(self.path.to_owned(), op.path);
-            return;
+            return OpState::ErrPathMismatch;
         }
 
         // haven't reached end yet, navigate
@@ -133,26 +131,25 @@ where
                 let op_id = op_id.to_owned();
                 if let Some(idx) = self.find_idx(op_id) {
                     if self.ops[idx].content.is_none() {
-                        return;
+                        return OpState::ErrListApplyToEmpty;
                     } else {
-                        self.ops[idx].content.as_mut().unwrap().apply(op);
-                        return;
+                        return self.ops[idx].content.as_mut().unwrap().apply(op);
                     }
                 } else {
                     debug_path_mismatch(
                         join_path(self.path.to_owned(), PathSegment::Index(op_id)),
                         op.path,
                     );
-                    return;
+                    return OpState::ErrPathMismatch;
                 };
             } else {
                 debug_path_mismatch(self.path.to_owned(), op.path);
-                return;
+                return OpState::ErrPathMismatch;
             }
         }
 
         // otherwise, this is just a direct replacement
-        self.integrate(op.into());
+        self.integrate(op.into())
     }
 
     /// Main CRDT logic of integrating an op properly into our local log
@@ -162,16 +159,15 @@ where
     /// Effectively, we
     /// 1) find the parent item
     /// 2) find the right spot to insert before the next node
-    fn integrate(&mut self, new_op: Op<T>) {
+    fn integrate(&mut self, new_op: Op<T>) -> OpState {
         let op_id = new_op.id;
         let author = new_op.author();
         let seq = new_op.sequence_num();
         let origin_id = self.find_idx(new_op.origin);
 
-        // we haven't received the causal parent of this operation yet, queue this it up for later
         if origin_id.is_none() {
             self.message_q.entry(new_op.origin).or_default().push(new_op);
-            return;
+            return OpState::MissingCausalDependencies;
         }
 
         let new_op_parent_idx = origin_id.unwrap();
@@ -182,7 +178,7 @@ where
         if new_op.is_deleted {
             let mut op = &mut self.ops[new_op_parent_idx];
             op.is_deleted = true;
-            return;
+            return OpState::Ok;
         }
 
         // start looking from right after parent
@@ -194,7 +190,7 @@ where
 
             // idempotency
             if op.id == new_op.id {
-                return;
+                return OpState::Ok;
             }
 
             // first, lets compare causal origins
@@ -238,6 +234,7 @@ where
                 self.integrate(dependent);
             }
         }
+        OpState::Ok
     }
 
     /// Make an iterator out of list CRDT contents, ignoring deleted items and empty content
@@ -312,7 +309,7 @@ impl<T> CRDTNode for ListCRDT<T>
 where
     T: CRDTNode,
 {
-    fn apply(&mut self, op: Op<Value>) {
+    fn apply(&mut self, op: Op<Value>) -> OpState {
         self.apply(op.into())
     }
 

@@ -116,33 +116,31 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                     } 
 
                     impl #impl_generics #crate_name::json_crdt::CRDTNode for #ident #ty_generics #where_clause {
-                        fn apply(&mut self, op: #crate_name::op::Op<#crate_name::json_crdt::Value>) {
-                            // tried to assign to a struct field directly, invalid
+                        fn apply(&mut self, op: #crate_name::op::Op<#crate_name::json_crdt::Value>) -> #crate_name::json_crdt::OpState {
                             let path = op.path.clone();
                             let author = op.id.clone();
-                            if self.path.len() >= path.len() {
-                                return;
+
+                            // ensure subpath
+                            if !#crate_name::op::ensure_subpath(&self.path, &op.path) {
+                                #crate_name::debug::debug_path_mismatch(self.path.to_owned(), op.path);
+                                return #crate_name::json_crdt::OpState::ErrPathMismatch;
                             }
 
-                            let mut idx = 0;
-                            for (our_path_segment, op_path_segment) in self.path.iter().zip(op.path.iter()) {
-                                let ours = if let #crate_name::op::PathSegment::Field(f) = our_path_segment { Some(f) } else { None };
-                                let theirs = if let #crate_name::op::PathSegment::Field(f) = op_path_segment { Some(f) } else { None };
-                                if ours != theirs {
-                                    #crate_name::debug::debug_path_mismatch(self.path.clone(), op.path.clone());
-                                    return;
-                                }
-                                idx += 1;
-                            }
-
-                            if let #crate_name::op::PathSegment::Field(path_seg) = &op.path[idx] {
-                                match &path_seg[..] {
-                                    #(#ident_strings => {
-                                        self.#ident_literals.apply(op.into());
-                                    }),*
-                                    _ => {},
+                            if self.path.len() == op.path.len() {
+                                // can't directly assign to struct
+                                return #crate_name::json_crdt::OpState::ErrApplyOnStruct; 
+                            } else {
+                                let idx = self.path.len();
+                                if let #crate_name::op::PathSegment::Field(path_seg) = &op.path[idx] {
+                                    match &path_seg[..] {
+                                        #(#ident_strings => {
+                                            return self.#ident_literals.apply(op.into());
+                                        }),*
+                                        _ => {},
+                                    };
                                 };
-                            };
+                                return #crate_name::json_crdt::OpState::ErrPathMismatch 
+                            }
                         }
 
                         fn view(&self) -> #crate_name::json_crdt::Value {

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    debug::{DebugView, debug_op_on_primitive},
+    debug::{debug_op_on_primitive, DebugView},
     keypair::{sha256, sign, AuthorID, SignedDigest},
     list_crdt::ListCRDT,
     lww_crdt::LWWRegisterCRDT,
@@ -17,11 +17,41 @@ use fastcrypto::{
     Verifier,
 };
 
-// Anything that can be nested in a JSON CRDT
+/// Anything that can be nested in a JSON CRDT
 pub trait CRDTNode: CRDTNodeFromValue + Hashable + Clone {
-    fn apply(&mut self, op: Op<Value>);
+    fn apply(&mut self, op: Op<Value>) -> OpState;
     fn view(&self) -> Value;
     fn new(id: AuthorID, path: Vec<PathSegment>) -> Self;
+}
+
+/// Enum representing possible outcomes of applying an operation to a CRDT
+pub enum OpState {
+    /// Operation applied successfully 
+    Ok,
+    /// Tried to apply an operation to a non-CRDT primative (i.e. f64, bool, etc.)
+    /// If you would like a mutable primitive, wrap it in a [`LWWRegisterCRDT`]
+    ErrApplyOnPrimitive,
+    /// Tried to apply an operation to a static struct CRDT
+    /// If you would like a mutable object, use a [`Value`]
+    ErrApplyOnStruct,
+    /// Tried to apply an operation that contains content of the wrong type.
+    /// In other words, the content cannot be coerced to the CRDT at the path specified.
+    ErrMismatchedType,
+    /// The signed digest of the message did not match the claimed author of the message.
+    /// This can happen if the message was tampered with during delivery
+    ErrDigestMismatch,
+    /// The hash of the message did not match the contents of the mesage.
+    /// This can happen if the author tried to perform an equivocation attack by creating an
+    /// operation and modifying it has already been created
+    ErrHashMismatch,
+    /// Tried to apply an operation to a non-existent path. The author may have forgotten to attach
+    /// a causal dependency
+    ErrPathMismatch,
+    /// Trying to modify/delete the sentinel (zero-th) node element that is used for book-keeping
+    ErrListApplyToEmpty,
+    /// We have not received all of the causal dependencies of this operation. It has been queued
+    /// up and will be executed when its causal dependencies have been delivered
+    MissingCausalDependencies,
 }
 
 /// implement CRDTNode for non-CRDTs
@@ -37,8 +67,8 @@ impl<T> CRDTNode for T
 where
     T: CRDTNodeFromValue + MarkPrimitive + Hashable + Clone,
 {
-    fn apply(&mut self, _op: Op<Value>) {
-        debug_op_on_primitive(_op.path);
+    fn apply(&mut self, _op: Op<Value>) -> OpState {
+        OpState::ErrApplyOnPrimitive
     }
 
     fn view(&self) -> Value {
@@ -47,7 +77,7 @@ where
 
     fn new(_id: AuthorID, _path: Vec<PathSegment>) -> Self {
         debug_op_on_primitive(_path);
-        Default::default() 
+        Default::default()
     }
 }
 
@@ -683,9 +713,7 @@ mod test {
         let row0: Value = json!([true, false]).into();
         let row1: Value = json!([false, true]).into();
         let construct1 = base1.doc.grid.insert_idx(0, row0).sign(&kp1);
-        base1.debug_view();
         let construct2 = base1.doc.grid.insert_idx(1, row1).sign(&kp1);
-        base1.debug_view();
 
         base2.apply(construct1);
         base2.apply(construct2);
@@ -716,8 +744,70 @@ mod test {
     fn test_arb_json() {
         #[add_crdt_fields]
         #[derive(Clone, CRDTNode)]
-        struct Todo {
+        struct Test {
             reg: LWWRegisterCRDT<Value>,
         }
+
+        let kp1 = make_keypair();
+        let mut base1 = BaseCRDT::<Test>::new(&kp1);
+
+        let base_val: Value = json!({
+            "a": true,
+            "b": "asdf",
+            "c": {
+                "d": [],
+                "e": [ false ]
+            }
+        })
+        .into();
+        base1.doc.reg.set(base_val).sign(&kp1);
+        assert_eq!(
+            base1.doc.view().into_json(),
+            json!({
+                "reg": {
+                    "a": true,
+                    "b": "asdf",
+                    "c": {
+                        "d": [],
+                        "e": [ false ]
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_wrong_json_types() {
+        #[add_crdt_fields]
+        #[derive(Clone, CRDTNode)]
+        struct Nested {
+            list: ListCRDT<i64>,
+        }
+
+        #[add_crdt_fields]
+        #[derive(Clone, CRDTNode)]
+        struct Test {
+            reg: LWWRegisterCRDT<bool>,
+            strct: ListCRDT<Nested>,
+        }
+
+        let key = make_keypair();
+        let mut crdt = BaseCRDT::<Test>::new(&key);
+
+        // wrong type should not go through
+        crdt.doc.reg.set(32);
+        assert_eq!(crdt.doc.reg.view(), json!(null).into());
+        crdt.doc.reg.set(true);
+        assert_eq!(crdt.doc.reg.view(), json!(true).into());
+
+        // set nested
+        let empty_list: Value = json!([]).into();
+        let mut list_view: Value = crdt.doc.strct.view().into();
+        assert_eq!(list_view, json!([]).into());
+        crdt.doc.strct.insert_idx(0, empty_list);
+
+        // can't have empty
+        list_view = crdt.doc.strct.view().into();
+        assert_eq!(list_view, json!([]).into());
     }
 }

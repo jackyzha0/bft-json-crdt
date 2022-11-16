@@ -1,4 +1,5 @@
-use crate::json_crdt::{CRDTNode, CRDTNodeFromValue, SignedOp, Value, IntoCRDTNode};
+use crate::debug::debug_path_mismatch;
+use crate::json_crdt::{CRDTNode, CRDTNodeFromValue, IntoCRDTNode, SignedOp, Value};
 use crate::keypair::{sha256, AuthorID};
 use fastcrypto::ed25519::Ed25519KeyPair;
 use std::fmt::Debug;
@@ -36,12 +37,14 @@ pub fn print_path(path: Vec<PathSegment>) -> String {
 
 pub fn ensure_subpath(our_path: &Vec<PathSegment>, op_path: &Vec<PathSegment>) -> bool {
     if our_path.len() > op_path.len() {
+        debug_path_mismatch(our_path.to_owned(), op_path.to_owned());
         return false;
     }
     for i in 0..our_path.len() {
         let ours = our_path.get(i);
         let theirs = op_path.get(i);
         if ours != theirs {
+            debug_path_mismatch(our_path.to_owned(), op_path.to_owned());
             return false;
         }
     }
@@ -96,7 +99,9 @@ impl Op<Value> {
     pub fn into<T: CRDTNodeFromValue + CRDTNode>(self) -> Op<T> {
         // TODO instead of doing ok(), unwrap inner error and report it
         Op {
-            content: self.content.and_then(|c| c.into_node(self.id, self.path.clone()).ok()),
+            content: self
+                .content
+                .and_then(|c| c.into_node(self.id, self.path.clone()).ok()),
             origin: self.origin,
             author: self.author,
             seq: self.seq,
