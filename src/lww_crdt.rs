@@ -22,8 +22,6 @@ where
     value: Op<T>,
     /// Keeps track of the latest document version we know for each peer
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
-    /// Highest document version we've seen
-    highest_seq: SequenceNumber,
 }
 
 impl<T> LWWRegisterCRDT<T>
@@ -39,7 +37,6 @@ where
             path,
             value: Op::make_root(),
             logical_clocks,
-            highest_seq: 0,
         }
     }
 
@@ -58,7 +55,7 @@ where
             Some(content.into()),
             self.path.to_owned(),
         );
-        
+
         // we need to know the op ID before setting the path as [`PathSegment::Index`] requires an
         // [`OpID`]
         let new_path = join_path(self.path.to_owned(), PathSegment::Index(op.id));
@@ -100,8 +97,8 @@ where
 
         // update bookkeeping
         self.logical_clocks.insert(author, seq);
-        self.highest_seq = max(self.highest_seq, seq);
-        self.logical_clocks.insert(self.our_id, self.highest_seq);
+        let highest_seq = max(self.our_seq(), seq);
+        self.logical_clocks.insert(self.our_id, highest_seq);
         OpState::Ok
     }
 

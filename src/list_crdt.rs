@@ -28,8 +28,6 @@ where
     message_q: HashMap<OpID, Vec<Op<T>>>,
     /// Keeps track of the latest document version we know for each peer
     logical_clocks: HashMap<AuthorID, SequenceNumber>,
-    /// Highest document version we've seen
-    highest_seq: SequenceNumber,
 }
 
 impl<T> ListCRDT<T>
@@ -47,7 +45,6 @@ where
             ops,
             message_q: HashMap::new(),
             logical_clocks,
-            highest_seq: 0,
         }
     }
 
@@ -234,8 +231,8 @@ where
 
         // update sequence number for sender and for ourselves
         self.logical_clocks.insert(author, seq);
-        self.highest_seq = max(self.highest_seq, seq);
-        self.logical_clocks.insert(self.our_id, self.highest_seq);
+        let highest_seq = max(self.our_seq(), seq);
+        self.logical_clocks.insert(self.our_id, highest_seq);
 
         // log result
         self.log_ops(Some(op_id));
