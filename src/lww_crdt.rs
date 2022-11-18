@@ -2,7 +2,6 @@ use crate::debug::DebugView;
 use crate::json_crdt::{CRDTNode, OpState, Value};
 use crate::op::{join_path, print_path, Op, PathSegment, SequenceNumber};
 use std::cmp::{max, Ordering};
-use std::collections::HashMap;
 use std::fmt::Debug;
 
 use crate::keypair::AuthorID;
@@ -20,8 +19,8 @@ where
     pub path: Vec<PathSegment>,
     /// Internal value of this CRDT. We wrap it in an Op to retain the author/sequence metadata
     value: Op<T>,
-    /// Keeps track of the latest document version we know for each peer
-    logical_clocks: HashMap<AuthorID, SequenceNumber>,
+    /// The sequence number of this node
+    our_seq: SequenceNumber,
 }
 
 impl<T> LWWRegisterCRDT<T>
@@ -30,19 +29,12 @@ where
 {
     /// Create a new register CRDT with the given [`AuthorID`] (it should be unique)
     pub fn new(id: AuthorID, path: Vec<PathSegment>) -> LWWRegisterCRDT<T> {
-        let mut logical_clocks = HashMap::new();
-        logical_clocks.insert(id, 0);
         LWWRegisterCRDT {
             our_id: id,
             path,
             value: Op::make_root(),
-            logical_clocks,
+            our_seq: 0,
         }
-    }
-
-    /// Get our own sequence number
-    pub fn our_seq(&self) -> SequenceNumber {
-        *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
     /// Sets the current value of the register
@@ -50,7 +42,7 @@ where
         let mut op = Op::new(
             self.value.id,
             self.our_id,
-            self.our_seq() + 1,
+            self.our_seq + 1,
             false,
             Some(content.into()),
             self.path.to_owned(),
@@ -71,11 +63,10 @@ where
         }
 
         let op: Op<T> = op.into();
-        let author = op.author();
         let seq = op.sequence_num();
 
         // take most recent update by sequence number
-        match seq.cmp(&self.our_seq()) {
+        match seq.cmp(&self.our_seq) {
             Ordering::Greater => {
                 self.value = Op {
                     id: self.value.id,
@@ -96,9 +87,7 @@ where
         };
 
         // update bookkeeping
-        self.logical_clocks.insert(author, seq);
-        let highest_seq = max(self.our_seq(), seq);
-        self.logical_clocks.insert(self.our_id, highest_seq);
+        self.our_seq = max(self.our_seq, seq);
         OpState::Ok
     }
 

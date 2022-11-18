@@ -26,8 +26,8 @@ where
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
     message_q: HashMap<OpID, Vec<Op<T>>>,
-    /// Keeps track of the latest document version we know for each peer
-    logical_clocks: HashMap<AuthorID, SequenceNumber>,
+    /// The sequence number of this node
+    our_seq: SequenceNumber,
 }
 
 impl<T> ListCRDT<T>
@@ -37,20 +37,13 @@ where
     /// Create a new List CRDT with the given [`AuthorID`] (it should be unique)
     pub fn new(id: AuthorID, path: Vec<PathSegment>) -> ListCRDT<T> {
         let ops = vec![Op::make_root()];
-        let mut logical_clocks = HashMap::new();
-        logical_clocks.insert(id, 0);
         ListCRDT {
             our_id: id,
             path,
             ops,
             message_q: HashMap::new(),
-            logical_clocks,
+            our_seq: 0,
         }
-    }
-
-    /// Get our own sequence number
-    pub fn our_seq(&self) -> SequenceNumber {
-        *self.logical_clocks.get(&self.our_id).unwrap()
     }
 
     /// Locally insert some content causally after the given operation
@@ -58,7 +51,7 @@ where
         let mut op = Op::new(
             after,
             self.our_id,
-            self.our_seq() + 1,
+            self.our_seq + 1,
             false,
             Some(content.into()),
             self.path.to_owned(),
@@ -107,7 +100,7 @@ where
         let op = Op::new(
             id,
             self.our_id,
-            self.our_seq() + 1,
+            self.our_seq + 1,
             true,
             None,
             join_path(self.path.to_owned(), PathSegment::Index(id)),
@@ -168,7 +161,6 @@ where
     /// 2) find the right spot to insert before the next node
     fn integrate(&mut self, new_op: Op<T>) -> OpState {
         let op_id = new_op.id;
-        let author = new_op.author();
         let seq = new_op.sequence_num();
         let origin_id = self.find_idx(new_op.origin);
 
@@ -228,13 +220,7 @@ where
 
         // insert at i
         self.ops.insert(i, new_op);
-
-        // update sequence number for sender and for ourselves
-        self.logical_clocks.insert(author, seq);
-        let highest_seq = max(self.our_seq(), seq);
-        self.logical_clocks.insert(self.our_id, highest_seq);
-
-        // log result
+        self.our_seq = max(self.our_seq, seq);
         self.log_ops(Some(op_id));
 
         // apply all of its causal dependents if there are any
