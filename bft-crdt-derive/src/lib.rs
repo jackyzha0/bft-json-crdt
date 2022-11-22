@@ -37,7 +37,7 @@ pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStre
         );
         fields.named.push(
             Field::parse_named
-                .parse2(quote! { id: #crate_name::keypair::AuthorID })
+                .parse2(quote! { id: #crate_name::keypair::AuthorId })
                 .unwrap(),
         );
     }
@@ -49,7 +49,7 @@ pub fn add_crdt_fields(args: OgTokenStream, input: OgTokenStream) -> OgTokenStre
 }
 
 /// Proc macro to automatically derive the CRDTNode trait
-#[proc_macro_derive(CRDTNode)]
+#[proc_macro_derive(CrdtNode)]
 pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
     // parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
@@ -80,7 +80,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         ident_literals.push(ident.clone());
                         tys.push(ty.clone());
                         field_impls.push(quote! {
-                            #ident: <#ty as CRDTNode>::new(
+                            #ident: <#ty as CrdtNode>::new(
                                 id,
                                 #crate_name::op::join_path(path.clone(), #crate_name::op::PathSegment::Field(#str_literal.to_string()))
                             )
@@ -89,8 +89,8 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                 }
 
                 let expanded = quote! {
-                    impl #impl_generics #crate_name::json_crdt::CRDTNodeFromValue for #ident #ty_generics #where_clause {
-                        fn node_from(value: #crate_name::json_crdt::Value, id: #crate_name::keypair::AuthorID, path: Vec<#crate_name::op::PathSegment>) -> Result<Self, String> {
+                    impl #impl_generics #crate_name::json_crdt::CrdtNodeFromValue for #ident #ty_generics #where_clause {
+                        fn node_from(value: #crate_name::json_crdt::Value, id: #crate_name::keypair::AuthorId, path: Vec<#crate_name::op::PathSegment>) -> Result<Self, String> {
                             if let #crate_name::json_crdt::Value::Object(mut obj) = value {
                                 Ok(#ident {
                                     path: path.clone(),
@@ -118,7 +118,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                         }
                     } 
 
-                    impl #impl_generics #crate_name::json_crdt::CRDTNode for #ident #ty_generics #where_clause {
+                    impl #impl_generics #crate_name::json_crdt::CrdtNode for #ident #ty_generics #where_clause {
                         fn apply(&mut self, op: #crate_name::op::Op<#crate_name::json_crdt::Value>) -> #crate_name::json_crdt::OpState {
                             let path = op.path.clone();
                             let author = op.id.clone();
@@ -149,7 +149,7 @@ pub fn derive_json_crdt(input: OgTokenStream) -> OgTokenStream {
                             #crate_name::json_crdt::Value::Object(view_map)
                         }
 
-                        fn new(id: #crate_name::keypair::AuthorID, path: Vec<#crate_name::op::PathSegment>) -> Self {
+                        fn new(id: #crate_name::keypair::AuthorId, path: Vec<#crate_name::op::PathSegment>) -> Self {
                             Self {
                                 path: path.clone(),
                                 id,

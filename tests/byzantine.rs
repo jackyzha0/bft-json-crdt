@@ -1,8 +1,8 @@
 use bft_json_crdt::{
-    json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, OpState},
+    json_crdt::{add_crdt_fields, BaseCrdt, CrdtNode, IntoCrdtNode, OpState},
     keypair::make_keypair,
-    list_crdt::ListCRDT,
-    lww_crdt::LWWRegisterCRDT,
+    list_crdt::ListCrdt,
+    lww_crdt::LwwRegisterCrdt,
     op::{Op, PathSegment, ROOT_ID},
 };
 use serde_json::json;
@@ -20,9 +20,9 @@ use serde_json::json;
 // 5. block actual messages from honest actors (eclipse attack)
 
 #[add_crdt_fields]
-#[derive(Clone, CRDTNode)]
+#[derive(Clone, CrdtNode)]
 struct ListExample {
-    list: ListCRDT<char>,
+    list: ListCrdt<char>,
 }
 
 // case 2a + 2b
@@ -30,8 +30,8 @@ struct ListExample {
 fn test_equivocation() {
     let key = make_keypair();
     let testkey = make_keypair();
-    let mut crdt = BaseCRDT::<ListExample>::new(&key);
-    let mut testcrdt = BaseCRDT::<ListExample>::new(&testkey);
+    let mut crdt = BaseCrdt::<ListExample>::new(&key);
+    let mut testcrdt = BaseCrdt::<ListExample>::new(&testkey);
     let _a = crdt.doc.list.insert(ROOT_ID, 'a').sign(&key);
     let _b = crdt.doc.list.insert(_a.id(), 'b').sign(&key);
 
@@ -62,8 +62,8 @@ fn test_equivocation() {
 fn test_forge_update() {
     let key = make_keypair();
     let testkey = make_keypair();
-    let mut crdt = BaseCRDT::<ListExample>::new(&key);
-    let mut testcrdt = BaseCRDT::<ListExample>::new(&testkey);
+    let mut crdt = BaseCrdt::<ListExample>::new(&key);
+    let mut testcrdt = BaseCrdt::<ListExample>::new(&testkey);
     let _a = crdt.doc.list.insert(ROOT_ID, 'a').sign(&key);
 
     let fake_key = make_keypair(); // generate a new keypair as we dont have privkey of list.our_id
@@ -91,23 +91,23 @@ fn test_forge_update() {
 }
 
 #[add_crdt_fields]
-#[derive(Clone, CRDTNode)]
+#[derive(Clone, CrdtNode)]
 struct Nested {
     a: Nested2,
 }
 
 #[add_crdt_fields]
-#[derive(Clone, CRDTNode)]
+#[derive(Clone, CrdtNode)]
 struct Nested2 {
-    b: LWWRegisterCRDT<bool>,
+    b: LwwRegisterCrdt<bool>,
 }
 
 #[test]
 fn test_path_update() {
     let key = make_keypair();
     let testkey = make_keypair();
-    let mut crdt = BaseCRDT::<Nested>::new(&key);
-    let mut testcrdt = BaseCRDT::<Nested>::new(&testkey);
+    let mut crdt = BaseCrdt::<Nested>::new(&key);
+    let mut testcrdt = BaseCrdt::<Nested>::new(&testkey);
     let mut _true = crdt.doc.a.b.set(true);
     _true.path = vec![PathSegment::Field("x".to_string())];
     let mut _false = crdt.doc.a.b.set(false);

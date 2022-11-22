@@ -1,20 +1,20 @@
 use crate::debug::DebugView;
-use crate::json_crdt::{CRDTNode, OpState, Value};
+use crate::json_crdt::{CrdtNode, OpState, Value};
 use crate::op::{join_path, print_path, Op, PathSegment, SequenceNumber};
 use std::cmp::{max, Ordering};
 use std::fmt::Debug;
 
-use crate::keypair::AuthorID;
+use crate::keypair::AuthorId;
 
 /// A simple delete-wins, last-writer-wins (LWW) register CRDT.
 /// Basically only for adding support for primitives within a more complex CRDT
 #[derive(Clone)]
-pub struct LWWRegisterCRDT<T>
+pub struct LwwRegisterCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     /// Public key for this node
-    pub our_id: AuthorID,
+    pub our_id: AuthorId,
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
     /// Internal value of this CRDT. We wrap it in an Op to retain the author/sequence metadata
@@ -23,13 +23,13 @@ where
     our_seq: SequenceNumber,
 }
 
-impl<T> LWWRegisterCRDT<T>
+impl<T> LwwRegisterCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     /// Create a new register CRDT with the given [`AuthorID`] (it should be unique)
-    pub fn new(id: AuthorID, path: Vec<PathSegment>) -> LWWRegisterCRDT<T> {
-        LWWRegisterCRDT {
+    pub fn new(id: AuthorId, path: Vec<PathSegment>) -> LwwRegisterCrdt<T> {
+        LwwRegisterCrdt {
             our_id: id,
             path,
             value: Op::make_root(),
@@ -96,9 +96,9 @@ where
     }
 }
 
-impl<T> CRDTNode for LWWRegisterCRDT<T>
+impl<T> CrdtNode for LwwRegisterCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn apply(&mut self, op: Op<Value>) -> OpState {
         self.apply(op.into())
@@ -108,14 +108,14 @@ where
         self.view().into()
     }
 
-    fn new(id: AuthorID, path: Vec<PathSegment>) -> Self {
+    fn new(id: AuthorId, path: Vec<PathSegment>) -> Self {
         Self::new(id, path)
     }
 }
 
-impl<T> DebugView for LWWRegisterCRDT<T>
+impl<T> DebugView for LwwRegisterCrdt<T>
 where
-    T: CRDTNode + DebugView,
+    T: CrdtNode + DebugView,
 {
     fn debug_view(&self, indent: usize) -> String {
         let spacing = " ".repeat(indent);
@@ -125,9 +125,9 @@ where
     }
 }
 
-impl<T> Debug for LWWRegisterCRDT<T>
+impl<T> Debug for LwwRegisterCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value.id)
@@ -136,12 +136,12 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::LWWRegisterCRDT;
+    use super::LwwRegisterCrdt;
     use crate::{json_crdt::OpState, keypair::make_author};
 
     #[test]
     fn test_lww_simple() {
-        let mut register = LWWRegisterCRDT::new(make_author(1), vec![]);
+        let mut register = LwwRegisterCrdt::new(make_author(1), vec![]);
         assert_eq!(register.view(), None);
         register.set(1);
         assert_eq!(register.view(), Some(1));
@@ -151,8 +151,8 @@ mod test {
 
     #[test]
     fn test_lww_multiple_writer() {
-        let mut register1 = LWWRegisterCRDT::new(make_author(1), vec![]);
-        let mut register2 = LWWRegisterCRDT::new(make_author(2), vec![]);
+        let mut register1 = LwwRegisterCrdt::new(make_author(1), vec![]);
+        let mut register2 = LwwRegisterCrdt::new(make_author(2), vec![]);
         let _a = register1.set('a');
         let _b = register1.set('b');
         let _c = register2.set('c');
@@ -166,7 +166,7 @@ mod test {
 
     #[test]
     fn test_lww_idempotence() {
-        let mut register = LWWRegisterCRDT::new(make_author(1), vec![]);
+        let mut register = LwwRegisterCrdt::new(make_author(1), vec![]);
         let op = register.set(1);
         for _ in 1..10 {
             assert_eq!(register.apply(op.clone()), OpState::Ok);
@@ -176,8 +176,8 @@ mod test {
 
     #[test]
     fn test_lww_consistent_tiebreak() {
-        let mut register1 = LWWRegisterCRDT::new(make_author(1), vec![]);
-        let mut register2 = LWWRegisterCRDT::new(make_author(2), vec![]);
+        let mut register1 = LwwRegisterCrdt::new(make_author(1), vec![]);
+        let mut register2 = LwwRegisterCrdt::new(make_author(2), vec![]);
         let _a = register1.set('a');
         let _b = register2.set('b');
         assert_eq!(register1.apply(_b), OpState::Ok);

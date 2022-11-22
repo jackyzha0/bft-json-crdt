@@ -1,6 +1,6 @@
 use bft_json_crdt::keypair::make_author;
-use bft_json_crdt::list_crdt::ListCRDT;
-use bft_json_crdt::op::{OpID, ROOT_ID};
+use bft_json_crdt::list_crdt::ListCrdt;
+use bft_json_crdt::op::{OpId, ROOT_ID};
 use std::{fs::File, io::Read};
 use time::PreciseTime;
 
@@ -41,8 +41,8 @@ fn get_trace() -> Trace {
 #[test]
 fn test_editing_trace() {
     let t = get_trace();
-    let mut list = ListCRDT::<char>::new(make_author(1), vec![]);
-    let mut ops: Vec<OpID> = Vec::new();
+    let mut list = ListCrdt::<char>::new(make_author(1), vec![]);
+    let mut ops: Vec<OpId> = Vec::new();
     ops.push(ROOT_ID);
     let start = PreciseTime::now();
     let edits = t.edits;

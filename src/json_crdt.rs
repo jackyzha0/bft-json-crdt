@@ -5,10 +5,10 @@ use std::{
 
 use crate::{
     debug::{debug_op_on_primitive, DebugView},
-    keypair::{sha256, sign, AuthorID, SignedDigest},
-    list_crdt::ListCRDT,
-    lww_crdt::LWWRegisterCRDT,
-    op::{print_hex, print_path, Hashable, Op, OpID, PathSegment},
+    keypair::{sha256, sign, AuthorId, SignedDigest},
+    list_crdt::ListCrdt,
+    lww_crdt::LwwRegisterCrdt,
+    op::{print_hex, print_path, Hashable, Op, OpId, PathSegment},
 };
 pub use bft_crdt_derive::*;
 use fastcrypto::{
@@ -18,9 +18,9 @@ use fastcrypto::{
 };
 
 /// Anything that can be nested in a JSON CRDT
-pub trait CRDTNode: CRDTNodeFromValue + Hashable + Clone {
+pub trait CrdtNode: CrdtNodeFromValue + Hashable + Clone {
     /// Create a new CRDT of this type
-    fn new(id: AuthorID, path: Vec<PathSegment>) -> Self;
+    fn new(id: AuthorId, path: Vec<PathSegment>) -> Self;
     /// Apply an operation to this CRDT, forwarding if necessary
     fn apply(&mut self, op: Op<Value>) -> OpState;
     /// Get a JSON representation of the value in this node
@@ -68,11 +68,11 @@ impl MarkPrimitive for char {}
 impl MarkPrimitive for String {}
 impl MarkPrimitive for Value {}
 
-/// Implement CRDTNode for non-CRDTs
+/// Implement CrdtNode for non-CRDTs
 /// This is a stub implementation so most functions don't do anything/log an error
-impl<T> CRDTNode for T
+impl<T> CrdtNode for T
 where
-    T: CRDTNodeFromValue + MarkPrimitive + Hashable + Clone,
+    T: CrdtNodeFromValue + MarkPrimitive + Hashable + Clone,
 {
     fn apply(&mut self, _op: Op<Value>) -> OpState {
         OpState::ErrApplyOnPrimitive
@@ -82,7 +82,7 @@ where
         self.to_owned().into()
     }
 
-    fn new(_id: AuthorID, _path: Vec<PathSegment>) -> Self {
+    fn new(_id: AuthorId, _path: Vec<PathSegment>) -> Self {
         debug_op_on_primitive(_path);
         Default::default()
     }
@@ -90,9 +90,9 @@ where
 
 /// The base struct for a JSON CRDT. Allows for declaring causal
 /// dependencies across fields. It only accepts messages of [`SignedOp`] for BFT.
-pub struct BaseCRDT<T: CRDTNode> {
+pub struct BaseCrdt<T: CrdtNode> {
     /// Public key of this CRDT
-    pub id: AuthorID,
+    pub id: AuthorId,
 
     /// Internal base CRDT
     pub doc: T,
@@ -109,7 +109,7 @@ pub struct BaseCRDT<T: CRDTNode> {
 pub struct SignedOp {
     // Note that this can be different from the author of the inner op as the inner op could have been created
     // by a different person
-    author: AuthorID,
+    author: AuthorId,
     /// Signed hash using priv key of author. Effectively [`OpID`] Use this as the ID to figure out what has been delivered already
     pub signed_digest: SignedDigest,
     pub inner: Op<Value>,
@@ -118,11 +118,11 @@ pub struct SignedOp {
 }
 
 impl SignedOp {
-    pub fn id(&self) -> OpID {
+    pub fn id(&self) -> OpId {
         self.inner.id
     }
 
-    pub fn author(&self) -> AuthorID {
+    pub fn author(&self) -> AuthorId {
         self.author
     }
 
@@ -163,7 +163,7 @@ impl SignedOp {
     }
 
     /// Sign a normal op and add all the needed metadata
-    pub fn from_op<T: CRDTNode>(
+    pub fn from_op<T: CrdtNode>(
         value: Op<T>,
         keypair: &Ed25519KeyPair,
         depends_on: Vec<SignedDigest>,
@@ -188,7 +188,7 @@ impl SignedOp {
     }
 }
 
-impl<T: CRDTNode + DebugView> BaseCRDT<T> {
+impl<T: CrdtNode + DebugView> BaseCrdt<T> {
     /// Crease a new BaseCRDT of the given type. Multiple BaseCRDTs
     /// can be created from a single keypair but you are responsible for 
     /// routing messages to the right BaseCRDT. Usually you should just make a single 
@@ -385,7 +385,7 @@ impl From<char> for Value {
 
 impl<T> From<Option<T>> for Value
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn from(val: Option<T>) -> Self {
         match val {
@@ -397,7 +397,7 @@ where
 
 impl<T> From<Vec<T>> for Value
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn from(value: Vec<T>) -> Self {
         Value::Array(value.iter().map(|x| x.view()).collect())
@@ -405,35 +405,35 @@ where
 }
 
 /// Fallibly create a CRDT Node from a JSON Value 
-pub trait CRDTNodeFromValue: Sized {
-    fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String>;
+pub trait CrdtNodeFromValue: Sized {
+    fn node_from(value: Value, id: AuthorId, path: Vec<PathSegment>) -> Result<Self, String>;
 }
 
 /// Fallibly cast a JSON Value into a CRDT Node 
-pub trait IntoCRDTNode<T>: Sized {
-    fn into_node(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String>;
+pub trait IntoCrdtNode<T>: Sized {
+    fn into_node(self, id: AuthorId, path: Vec<PathSegment>) -> Result<T, String>;
 }
 
-/// [`CRDTNodeFromValue`] implies [`IntoCRDTNode<T>`]
-impl<T> IntoCRDTNode<T> for Value
+/// [`CrdtNodeFromValue`] implies [`IntoCRDTNode<T>`]
+impl<T> IntoCrdtNode<T> for Value
 where
-    T: CRDTNodeFromValue,
+    T: CrdtNodeFromValue,
 {
-    fn into_node(self, id: AuthorID, path: Vec<PathSegment>) -> Result<T, String> {
+    fn into_node(self, id: AuthorId, path: Vec<PathSegment>) -> Result<T, String> {
         T::node_from(self, id, path)
     }
 }
 
-/// Trivial conversion from Value to Value as CRDTNodeFromValue
-impl CRDTNodeFromValue for Value {
-    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+/// Trivial conversion from Value to Value as CrdtNodeFromValue
+impl CrdtNodeFromValue for Value {
+    fn node_from(value: Value, _id: AuthorId, _path: Vec<PathSegment>) -> Result<Self, String> {
         Ok(value)
     }
 }
 
 /// Conversions from primitives to CRDTs
-impl CRDTNodeFromValue for bool {
-    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CrdtNodeFromValue for bool {
+    fn node_from(value: Value, _id: AuthorId, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Bool(x) = value {
             Ok(x)
         } else {
@@ -442,8 +442,8 @@ impl CRDTNodeFromValue for bool {
     }
 }
 
-impl CRDTNodeFromValue for f64 {
-    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CrdtNodeFromValue for f64 {
+    fn node_from(value: Value, _id: AuthorId, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Number(x) = value {
             Ok(x)
         } else {
@@ -452,8 +452,8 @@ impl CRDTNodeFromValue for f64 {
     }
 }
 
-impl CRDTNodeFromValue for i64 {
-    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CrdtNodeFromValue for i64 {
+    fn node_from(value: Value, _id: AuthorId, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Number(x) = value {
             Ok(x as i64)
         } else {
@@ -462,8 +462,8 @@ impl CRDTNodeFromValue for i64 {
     }
 }
 
-impl CRDTNodeFromValue for String {
-    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CrdtNodeFromValue for String {
+    fn node_from(value: Value, _id: AuthorId, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::String(x) = value {
             Ok(x)
         } else {
@@ -472,8 +472,8 @@ impl CRDTNodeFromValue for String {
     }
 }
 
-impl CRDTNodeFromValue for char {
-    fn node_from(value: Value, _id: AuthorID, _path: Vec<PathSegment>) -> Result<Self, String> {
+impl CrdtNodeFromValue for char {
+    fn node_from(value: Value, _id: AuthorId, _path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::String(x) = value.clone() {
             x.chars().next().ok_or(format!(
                 "failed to convert {value:?} -> char: found a zero-length string"
@@ -484,24 +484,24 @@ impl CRDTNodeFromValue for char {
     }
 }
 
-impl<T> CRDTNodeFromValue for LWWRegisterCRDT<T>
+impl<T> CrdtNodeFromValue for LwwRegisterCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
-    fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
-        let mut crdt = LWWRegisterCRDT::new(id, path);
+    fn node_from(value: Value, id: AuthorId, path: Vec<PathSegment>) -> Result<Self, String> {
+        let mut crdt = LwwRegisterCrdt::new(id, path);
         crdt.set(value);
         Ok(crdt)
     }
 }
 
-impl<T> CRDTNodeFromValue for ListCRDT<T>
+impl<T> CrdtNodeFromValue for ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
-    fn node_from(value: Value, id: AuthorID, path: Vec<PathSegment>) -> Result<Self, String> {
+    fn node_from(value: Value, id: AuthorId, path: Vec<PathSegment>) -> Result<Self, String> {
         if let Value::Array(arr) = value {
-            let mut crdt = ListCRDT::new(id, path);
+            let mut crdt = ListCrdt::new(id, path);
             let result: Result<(), String> =
                 arr.into_iter().enumerate().try_for_each(|(i, val)| {
                     crdt.insert_idx(i, val);
@@ -520,24 +520,24 @@ mod test {
     use serde_json::json;
 
     use crate::{
-        json_crdt::{add_crdt_fields, BaseCRDT, CRDTNode, IntoCRDTNode, OpState, Value},
+        json_crdt::{add_crdt_fields, BaseCrdt, CrdtNode, OpState, Value, IntoCrdtNode},
         keypair::make_keypair,
-        list_crdt::ListCRDT,
-        lww_crdt::LWWRegisterCRDT,
+        list_crdt::ListCrdt,
+        lww_crdt::LwwRegisterCrdt,
         op::{print_path, ROOT_ID},
     };
 
     #[test]
     fn test_derive_basic() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Player {
-            x: LWWRegisterCRDT<f64>,
-            y: LWWRegisterCRDT<f64>,
+            x: LwwRegisterCrdt<f64>,
+            y: LwwRegisterCrdt<f64>,
         }
 
         let keypair = make_keypair();
-        let crdt = BaseCRDT::<Player>::new(&keypair);
+        let crdt = BaseCrdt::<Player>::new(&keypair);
         assert_eq!(print_path(crdt.doc.x.path), "x");
         assert_eq!(print_path(crdt.doc.y.path), "y");
     }
@@ -545,22 +545,22 @@ mod test {
     #[test]
     fn test_derive_nested() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Position {
-            x: LWWRegisterCRDT<f64>,
-            y: LWWRegisterCRDT<f64>,
+            x: LwwRegisterCrdt<f64>,
+            y: LwwRegisterCrdt<f64>,
         }
 
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Player {
             pos: Position,
-            balance: LWWRegisterCRDT<f64>,
-            messages: ListCRDT<String>,
+            balance: LwwRegisterCrdt<f64>,
+            messages: ListCrdt<String>,
         }
 
         let keypair = make_keypair();
-        let crdt = BaseCRDT::<Player>::new(&keypair);
+        let crdt = BaseCrdt::<Player>::new(&keypair);
         assert_eq!(print_path(crdt.doc.pos.x.path), "pos.x");
         assert_eq!(print_path(crdt.doc.pos.y.path), "pos.y");
         assert_eq!(print_path(crdt.doc.balance.path), "balance");
@@ -570,17 +570,17 @@ mod test {
     #[test]
     fn test_lww_ops() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Test {
-            a: LWWRegisterCRDT<f64>,
-            b: LWWRegisterCRDT<bool>,
-            c: LWWRegisterCRDT<String>,
+            a: LwwRegisterCrdt<f64>,
+            b: LwwRegisterCrdt<bool>,
+            c: LwwRegisterCrdt<String>,
         }
 
         let kp1 = make_keypair();
         let kp2 = make_keypair();
-        let mut base1 = BaseCRDT::<Test>::new(&kp1);
-        let mut base2 = BaseCRDT::<Test>::new(&kp2);
+        let mut base1 = BaseCrdt::<Test>::new(&kp1);
+        let mut base2 = BaseCrdt::<Test>::new(&kp2);
 
         let _1_a_1 = base1.doc.a.set(3.0).sign(&kp1);
         let _1_b_1 = base1.doc.b.set(true).sign(&kp1);
@@ -630,15 +630,15 @@ mod test {
     #[test]
     fn test_vec_and_map_ops() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Test {
-            a: ListCRDT<String>,
+            a: ListCrdt<String>,
         }
 
         let kp1 = make_keypair();
         let kp2 = make_keypair();
-        let mut base1 = BaseCRDT::<Test>::new(&kp1);
-        let mut base2 = BaseCRDT::<Test>::new(&kp2);
+        let mut base1 = BaseCrdt::<Test>::new(&kp1);
+        let mut base2 = BaseCrdt::<Test>::new(&kp2);
 
         let _1a = base1.doc.a.insert(ROOT_ID, "a".to_string()).sign(&kp1);
         let _1b = base1.doc.a.insert(_1a.id(), "b".to_string()).sign(&kp1);
@@ -670,23 +670,23 @@ mod test {
     #[test]
     fn test_causal_field_dependency() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Item {
-            name: LWWRegisterCRDT<String>,
-            soulbound: LWWRegisterCRDT<bool>,
+            name: LwwRegisterCrdt<String>,
+            soulbound: LwwRegisterCrdt<bool>,
         }
 
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Player {
-            inventory: ListCRDT<Item>,
-            balance: LWWRegisterCRDT<f64>,
+            inventory: ListCrdt<Item>,
+            balance: LwwRegisterCrdt<f64>,
         }
 
         let kp1 = make_keypair();
         let kp2 = make_keypair();
-        let mut base1 = BaseCRDT::<Player>::new(&kp1);
-        let mut base2 = BaseCRDT::<Player>::new(&kp2);
+        let mut base1 = BaseCrdt::<Player>::new(&kp1);
+        let mut base2 = BaseCrdt::<Player>::new(&kp2);
 
         // require balance update to happen before inventory update
         let _add_money = base1.doc.balance.set(5000.0).sign(&kp1);
@@ -736,15 +736,15 @@ mod test {
     #[test]
     fn test_2d_grid() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Game {
-            grid: ListCRDT<ListCRDT<LWWRegisterCRDT<bool>>>,
+            grid: ListCrdt<ListCrdt<LwwRegisterCrdt<bool>>>,
         }
 
         let kp1 = make_keypair();
         let kp2 = make_keypair();
-        let mut base1 = BaseCRDT::<Game>::new(&kp1);
-        let mut base2 = BaseCRDT::<Game>::new(&kp2);
+        let mut base1 = BaseCrdt::<Game>::new(&kp1);
+        let mut base2 = BaseCrdt::<Game>::new(&kp2);
 
         // init a 2d grid
         let row0: Value = json!([true, false]).into();
@@ -797,13 +797,13 @@ mod test {
     #[test]
     fn test_arb_json() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Test {
-            reg: LWWRegisterCRDT<Value>,
+            reg: LwwRegisterCrdt<Value>,
         }
 
         let kp1 = make_keypair();
-        let mut base1 = BaseCRDT::<Test>::new(&kp1);
+        let mut base1 = BaseCrdt::<Test>::new(&kp1);
 
         let base_val: Value = json!({
             "a": true,
@@ -833,20 +833,20 @@ mod test {
     #[test]
     fn test_wrong_json_types() {
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Nested {
-            list: ListCRDT<f64>,
+            list: ListCrdt<f64>,
         }
 
         #[add_crdt_fields]
-        #[derive(Clone, CRDTNode)]
+        #[derive(Clone, CrdtNode)]
         struct Test {
-            reg: LWWRegisterCRDT<bool>,
-            strct: ListCRDT<Nested>,
+            reg: LwwRegisterCrdt<bool>,
+            strct: ListCrdt<Nested>,
         }
 
         let key = make_keypair();
-        let mut crdt = BaseCRDT::<Test>::new(&key);
+        let mut crdt = BaseCrdt::<Test>::new(&key);
 
         // wrong type should not go through
         crdt.doc.reg.set(32);

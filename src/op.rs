@@ -1,6 +1,6 @@
 use crate::debug::{debug_path_mismatch, debug_type_mismatch};
-use crate::json_crdt::{CRDTNode, CRDTNodeFromValue, IntoCRDTNode, SignedOp, Value};
-use crate::keypair::{sha256, AuthorID};
+use crate::json_crdt::{CrdtNode, CrdtNodeFromValue, IntoCrdtNode, SignedOp, Value};
+use crate::keypair::{sha256, AuthorId};
 use fastcrypto::ed25519::Ed25519KeyPair;
 use std::fmt::Debug;
 
@@ -8,16 +8,16 @@ use std::fmt::Debug;
 pub type SequenceNumber = u64;
 
 /// A unique ID for a single [`Op<T>`]
-pub type OpID = [u8; 32];
+pub type OpId = [u8; 32];
 
 /// The root/sentinel op
-pub const ROOT_ID: OpID = [0u8; 32];
+pub const ROOT_ID: OpId = [0u8; 32];
 
 /// Part of a path to get to a specific CRDT in a nested CRDT
 #[derive(Clone, Debug, PartialEq)]
 pub enum PathSegment {
     Field(String),
-    Index(OpID),
+    Index(OpId),
 }
 
 /// Format a byte array as a hex string
@@ -83,15 +83,15 @@ pub fn parse_field(path: Vec<PathSegment>) -> Option<String> {
 #[derive(Clone)]
 pub struct Op<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
-    pub origin: OpID,
-    pub author: AuthorID, // pub key of author
+    pub origin: OpId,
+    pub author: AuthorId, // pub key of author
     pub seq: SequenceNumber,
     pub content: Option<T>,
     pub path: Vec<PathSegment>, // path to get to target CRDT
     pub is_deleted: bool,
-    pub id: OpID, // hash of the operation
+    pub id: OpId, // hash of the operation
 }
 
 /// Something can be turned into a string. This allows us to use [`content`] as in
@@ -112,7 +112,7 @@ where
 
 /// Conversion from Op<Value> -> Op<T> given that T is a CRDT that can be created from a JSON value
 impl Op<Value> {
-    pub fn into<T: CRDTNodeFromValue + CRDTNode>(self) -> Op<T> {
+    pub fn into<T: CrdtNodeFromValue + CrdtNode>(self) -> Op<T> {
         let content = if let Some(inner_content) = self.content {
             match inner_content.into_node(self.id, self.path.clone()) {
                 Ok(node) => Some(node),
@@ -138,7 +138,7 @@ impl Op<Value> {
 
 impl<T> Op<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     pub fn sign(self, keypair: &Ed25519KeyPair) -> SignedOp {
         SignedOp::from_op(self, keypair, vec![])
@@ -159,7 +159,7 @@ where
         )
     }
 
-    pub fn author(&self) -> AuthorID {
+    pub fn author(&self) -> AuthorId {
         self.author
     }
 
@@ -168,8 +168,8 @@ where
     }
 
     pub fn new(
-        origin: OpID,
-        author: AuthorID,
+        origin: OpId,
+        author: AuthorId,
         seq: SequenceNumber,
         is_deleted: bool,
         content: Option<T>,
@@ -194,7 +194,7 @@ where
     /// - author
     /// - seq
     /// - is_deleted
-    pub fn hash_to_id(&self) -> OpID {
+    pub fn hash_to_id(&self) -> OpId {
         let content_str = match self.content.as_ref() {
             Some(content) => content.hash(),
             None => "".to_string(),

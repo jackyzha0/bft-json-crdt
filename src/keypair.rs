@@ -10,20 +10,20 @@ use rand::rngs::OsRng;
 use sha2::{Sha256, Digest};
 
 /// Represents the ID of a unique node. An Ed25519 public key
-pub type AuthorID = [u8; ED25519_PUBLIC_KEY_LENGTH];
+pub type AuthorId = [u8; ED25519_PUBLIC_KEY_LENGTH];
 
 /// A signed message
 pub type SignedDigest = [u8; ED25519_SIGNATURE_LENGTH];
 
 /// Create a fake public key from a u8
-pub fn make_author(n: u8) -> AuthorID {
+pub fn make_author(n: u8) -> AuthorId {
     let mut id = [0u8; ED25519_PUBLIC_KEY_LENGTH];
     id[0] = n;
     id
 }
 
 /// Get the least significant 32 bits of a public key
-pub fn lsb_32(pubkey: AuthorID) -> u32 {
+pub fn lsb_32(pubkey: AuthorId) -> u32 {
     ((pubkey[0] as u32) << 24)
         + ((pubkey[1] as u32) << 16)
         + ((pubkey[2] as u32) << 8)

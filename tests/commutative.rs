@@ -1,11 +1,11 @@
 use bft_json_crdt::{
     keypair::make_author,
-    list_crdt::ListCRDT,
-    op::{Op, OpID, ROOT_ID}, json_crdt::{CRDTNode, Value},
+    list_crdt::ListCrdt,
+    op::{Op, OpId, ROOT_ID}, json_crdt::{CrdtNode, Value},
 };
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 
-fn random_op<T: CRDTNode>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpID {
+fn random_op<T: CrdtNode>(arr: &Vec<Op<T>>, rng: &mut ThreadRng) -> OpId {
     arr.choose(rng).map(|op| op.id).unwrap_or(ROOT_ID)
 }
 
@@ -17,9 +17,9 @@ fn test_list_fuzz_commutative() {
     let mut op_log = Vec::<Op<Value>>::new();
     let mut op_log1 = Vec::<Op<Value>>::new();
     let mut op_log2 = Vec::<Op<Value>>::new();
-    let mut l1 = ListCRDT::<char>::new(make_author(1), vec![]);
-    let mut l2 = ListCRDT::<char>::new(make_author(2), vec![]);
-    let mut chk = ListCRDT::<char>::new(make_author(3), vec![]);
+    let mut l1 = ListCrdt::<char>::new(make_author(1), vec![]);
+    let mut l2 = ListCrdt::<char>::new(make_author(2), vec![]);
+    let mut chk = ListCrdt::<char>::new(make_author(3), vec![]);
     for _ in 0..TEST_N {
         let letter1: char = rng.gen_range(b'a'..=b'z') as char;
         let letter2: char = rng.gen_range(b'a'..=b'z') as char;

@@ -1,7 +1,7 @@
 use crate::{
     debug::debug_path_mismatch,
-    json_crdt::{CRDTNode, OpState, Value},
-    keypair::AuthorID,
+    json_crdt::{CrdtNode, OpState, Value},
+    keypair::AuthorId,
     op::*,
 };
 use std::{
@@ -13,31 +13,31 @@ use std::{
 
 /// An RGA-like list CRDT that can store a CRDT-like datatype
 #[derive(Clone)]
-pub struct ListCRDT<T>
+pub struct ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     /// Public key for this node
-    pub our_id: AuthorID,
+    pub our_id: AuthorId,
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
     /// List of all the operations we know of
     ops: Vec<Op<T>>,
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
-    message_q: HashMap<OpID, Vec<Op<T>>>,
+    message_q: HashMap<OpId, Vec<Op<T>>>,
     /// The sequence number of this node
     our_seq: SequenceNumber,
 }
 
-impl<T> ListCRDT<T>
+impl<T> ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     /// Create a new List CRDT with the given [`AuthorID`] (it should be unique)
-    pub fn new(id: AuthorID, path: Vec<PathSegment>) -> ListCRDT<T> {
+    pub fn new(id: AuthorId, path: Vec<PathSegment>) -> ListCrdt<T> {
         let ops = vec![Op::make_root()];
-        ListCRDT {
+        ListCrdt {
             our_id: id,
             path,
             ops,
@@ -47,7 +47,7 @@ where
     }
 
     /// Locally insert some content causally after the given operation
-    pub fn insert<U: Into<Value>>(&mut self, after: OpID, content: U) -> Op<Value> {
+    pub fn insert<U: Into<Value>>(&mut self, after: OpId, content: U) -> Op<Value> {
         let mut op = Op::new(
             after,
             self.our_id,
@@ -81,7 +81,7 @@ where
 
     /// Shorthand to figure out the OpID of something with a given index.
     /// Useful for declaring a causal dependency if you didn't create the original
-    pub fn id_at(&self, idx: usize) -> Option<OpID> {
+    pub fn id_at(&self, idx: usize) -> Option<OpId> {
         let mut i = 0;
         for op in &self.ops {
             if !op.is_deleted {
@@ -96,7 +96,7 @@ where
 
     /// Mark a node as deleted. If the node doesn't exist, it will be stuck
     /// waiting for that node to be created.
-    pub fn delete(&mut self, id: OpID) -> Op<Value> {
+    pub fn delete(&mut self, id: OpId) -> Op<Value> {
         let op = Op::new(
             id,
             self.our_id,
@@ -110,7 +110,7 @@ where
     }
 
     /// Find the idx of an operation with the given [`OpID`]
-    pub fn find_idx(&self, id: OpID) -> Option<usize> {
+    pub fn find_idx(&self, id: OpId) -> Option<usize> {
         self.ops.iter().position(|op| op.id == id)
     }
 
@@ -247,9 +247,9 @@ where
     }
 }
 
-impl<T> Debug for ListCRDT<T>
+impl<T> Debug for ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -265,9 +265,9 @@ where
 }
 
 /// Allows us to index into a List CRDT like we would with an array
-impl<T> Index<usize> for ListCRDT<T>
+impl<T> Index<usize> for ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     type Output = T;
     fn index(&self, idx: usize) -> &Self::Output {
@@ -285,9 +285,9 @@ where
 }
 
 /// Allows us to mutably index into a List CRDT like we would with an array
-impl<T> IndexMut<usize> for ListCRDT<T>
+impl<T> IndexMut<usize> for ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         let mut i = 0;
@@ -303,9 +303,9 @@ where
     }
 }
 
-impl<T> CRDTNode for ListCRDT<T>
+impl<T> CrdtNode for ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     fn apply(&mut self, op: Op<Value>) -> OpState {
         self.apply(op.into())
@@ -315,7 +315,7 @@ where
         self.view().into()
     }
 
-    fn new(id: AuthorID, path: Vec<PathSegment>) -> Self {
+    fn new(id: AuthorId, path: Vec<PathSegment>) -> Self {
         Self::new(id, path)
     }
 }
@@ -323,9 +323,9 @@ where
 #[cfg(feature = "logging-base")]
 use crate::debug::DebugView;
 #[cfg(feature = "logging-base")]
-impl<T> DebugView for ListCRDT<T>
+impl<T> DebugView for ListCrdt<T>
 where
-    T: CRDTNode + DebugView,
+    T: CrdtNode + DebugView,
 {
     fn debug_view(&self, indent: usize) -> String {
         let spacing = " ".repeat(indent);
@@ -348,11 +348,11 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{json_crdt::OpState, keypair::make_author, list_crdt::ListCRDT, op::ROOT_ID};
+    use crate::{json_crdt::OpState, keypair::make_author, list_crdt::ListCrdt, op::ROOT_ID};
 
     #[test]
     fn test_list_simple() {
-        let mut list = ListCRDT::<i64>::new(make_author(1), vec![]);
+        let mut list = ListCrdt::<i64>::new(make_author(1), vec![]);
         let _one = list.insert(ROOT_ID, 1);
         let _two = list.insert(_one.id, 2);
         let _three = list.insert(_two.id, 3);
@@ -362,7 +362,7 @@ mod test {
 
     #[test]
     fn test_list_idempotence() {
-        let mut list = ListCRDT::<i64>::new(make_author(1), vec![]);
+        let mut list = ListCrdt::<i64>::new(make_author(1), vec![]);
         let op = list.insert(ROOT_ID, 1);
         for _ in 1..10 {
             assert_eq!(list.apply(op.clone()), OpState::Ok);
@@ -372,7 +372,7 @@ mod test {
 
     #[test]
     fn test_list_delete() {
-        let mut list = ListCRDT::<char>::new(make_author(1), vec![]);
+        let mut list = ListCrdt::<char>::new(make_author(1), vec![]);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -383,7 +383,7 @@ mod test {
 
     #[test]
     fn test_list_interweave_chars() {
-        let mut list = ListCRDT::<char>::new(make_author(1), vec![]);
+        let mut list = ListCrdt::<char>::new(make_author(1), vec![]);
         let _one = list.insert(ROOT_ID, 'a');
         let _two = list.insert(_one.id, 'b');
         let _three = list.insert(ROOT_ID, 'c');
@@ -392,8 +392,8 @@ mod test {
 
     #[test]
     fn test_list_conflicting_agents() {
-        let mut list1 = ListCRDT::<char>::new(make_author(1), vec![]);
-        let mut list2 = ListCRDT::new(make_author(2), vec![]);
+        let mut list1 = ListCrdt::<char>::new(make_author(1), vec![]);
+        let mut list2 = ListCrdt::new(make_author(2), vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
         assert_eq!(list2.apply(_1_a.clone()), OpState::Ok);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -414,8 +414,8 @@ mod test {
 
     #[test]
     fn test_list_delete_multiple_agent() {
-        let mut list1 = ListCRDT::<char>::new(make_author(1), vec![]);
-        let mut list2 = ListCRDT::new(make_author(2), vec![]);
+        let mut list1 = ListCrdt::<char>::new(make_author(1), vec![]);
+        let mut list2 = ListCrdt::new(make_author(2), vec![]);
         let _1_a = list1.insert(ROOT_ID, 'a');
         assert_eq!(list2.apply(_1_a.clone()), OpState::Ok);
         let _2_b = list2.insert(_1_a.id, 'b');
@@ -429,7 +429,7 @@ mod test {
 
     #[test]
     fn test_list_nested() {
-        let mut list1 = ListCRDT::<char>::new(make_author(1), vec![]);
+        let mut list1 = ListCrdt::<char>::new(make_author(1), vec![]);
         let _c = list1.insert(ROOT_ID, 'c');
         let _a = list1.insert(ROOT_ID, 'a');
         let _d = list1.insert(_c.id, 'd');

@@ -1,14 +1,14 @@
 use crate::{
-    json_crdt::{BaseCRDT, SignedOp, CRDTNode},
+    json_crdt::{BaseCrdt, SignedOp, CrdtNode},
     keypair::SignedDigest,
-    list_crdt::ListCRDT,
-    op::{Op, OpID, PathSegment},
+    list_crdt::ListCrdt,
+    op::{Op, OpId, PathSegment},
 };
 
 #[cfg(feature = "logging-base")]
 use {
     crate::{
-        keypair::{lsb_32, AuthorID},
+        keypair::{lsb_32, AuthorId},
         op::{print_hex, print_path, ROOT_ID},
     },
     colored::Colorize,
@@ -25,7 +25,7 @@ fn author_to_hex(author: AuthorID) -> String {
 }
 
 #[cfg(feature = "logging-base")]
-fn display_op_id<T: CRDTNode>(op: &Op<T>) -> String {
+fn display_op_id<T: CrdtNode>(op: &Op<T>) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
         .seed(lsb_32(op.author))
@@ -86,7 +86,7 @@ pub trait DebugView {
     fn debug_view(&self, indent: usize) -> String;
 }
 
-impl<T: CRDTNode + DebugView> BaseCRDT<T> {
+impl<T: CrdtNode + DebugView> BaseCrdt<T> {
     pub fn debug_view(&self) {
         #[cfg(feature = "logging-json")]
         println!("document is now:\n{}", self.doc.debug_view(0));
@@ -134,7 +134,7 @@ impl<T: CRDTNode + DebugView> BaseCRDT<T> {
 
 impl<T> Op<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
     pub fn debug_hash_failure(&self) {
         #[cfg(feature = "logging-base")]
@@ -163,7 +163,7 @@ where
 
 impl<T> DebugView for Op<T>
 where
-    T: DebugView + CRDTNode,
+    T: DebugView + CrdtNode,
 {
     #[cfg(not(feature = "logging-base"))]
     fn debug_view(&self, _indent: usize) -> String {
@@ -190,11 +190,11 @@ where
     }
 }
 
-impl<T> ListCRDT<T>
+impl<T> ListCrdt<T>
 where
-    T: CRDTNode,
+    T: CrdtNode,
 {
-    pub fn log_ops(&self, _highlight: Option<OpID>) {
+    pub fn log_ops(&self, _highlight: Option<OpId>) {
         #[cfg(feature = "logging-list")]
         {
             let mut lines = Vec::<String>::new();
@@ -206,7 +206,7 @@ where
             }
 
             // figure out parent-child hierarchies from origins
-            let mut parent_child_map: HashMap<OpID, Vec<OpID>> = HashMap::new();
+            let mut parent_child_map: HashMap<OpId, Vec<OpId>> = HashMap::new();
             for op in &res {
                 let children = parent_child_map.entry(op.origin).or_default();
                 children.push(op.id);
@@ -223,7 +223,7 @@ where
             };
 
             // make stack of origins
-            let mut stack: Vec<(OpID, &str)> = Vec::new();
+            let mut stack: Vec<(OpId, &str)> = Vec::new();
             stack.push((ROOT_ID, ""));
             let mut prev = None;
             for op in &res {
