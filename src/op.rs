@@ -119,7 +119,7 @@ impl Op<Value> {
                 Err(msg) => {
                     debug_type_mismatch(msg);
                     None
-                },
+                }
             }
         } else {
             None

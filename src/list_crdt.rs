@@ -22,7 +22,7 @@ where
     /// Path to this CRDT
     pub path: Vec<PathSegment>,
     /// List of all the operations we know of
-    ops: Vec<Op<T>>,
+    pub ops: Vec<Op<T>>,
     /// Queue of messages where K is the ID of the message yet to arrive
     /// and V is the list of operations depending on it
     message_q: HashMap<OpId, Vec<Op<T>>>,
@@ -177,7 +177,7 @@ where
         // if its a delete operation, we don't need to do much
         self.log_apply(&new_op);
         if new_op.is_deleted {
-            let mut op = &mut self.ops[new_op_parent_idx];
+            let op = &mut self.ops[new_op_parent_idx];
             op.is_deleted = true;
             return OpState::Ok;
         }

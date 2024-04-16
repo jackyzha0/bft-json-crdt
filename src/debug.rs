@@ -1,5 +1,5 @@
 use crate::{
-    json_crdt::{BaseCrdt, SignedOp, CrdtNode},
+    json_crdt::{BaseCrdt, CrdtNode, SignedOp},
     keypair::SignedDigest,
     list_crdt::ListCrdt,
     op::{Op, OpId, PathSegment},
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 
 #[cfg(feature = "logging-base")]
-fn author_to_hex(author: AuthorID) -> String {
+fn author_to_hex(author: AuthorId) -> String {
     format!("{:#010x}", lsb_32(author))
 }
 
@@ -40,10 +40,7 @@ fn display_op_id<T: CrdtNode>(op: &Op<T>) -> String {
 pub fn debug_type_mismatch(_msg: String) {
     #[cfg(feature = "logging-base")]
     {
-        println!(
-            "  {}\n  {_msg}",
-            "type mismatch! ignoring this node".red(),
-        );
+        println!("  {}\n  {_msg}", "type mismatch! ignoring this node".red(),);
     }
 }
 
@@ -71,7 +68,7 @@ pub fn debug_op_on_primitive(_op_path: Vec<PathSegment>) {
 }
 
 #[cfg(feature = "logging-base")]
-fn display_author(author: AuthorID) -> String {
+fn display_author(author: AuthorId) -> String {
     let [r, g, b] = RandomColor::new()
         .luminosity(Luminosity::Light)
         .seed(lsb_32(author))
@@ -194,7 +191,7 @@ impl<T> ListCrdt<T>
 where
     T: CrdtNode,
 {
-    pub fn log_ops(&self, _highlight: Option<OpId>) {
+    pub fn log_ops(&self, highlight: Option<OpId>) {
         #[cfg(feature = "logging-list")]
         {
             let mut lines = Vec::<String>::new();
@@ -292,10 +289,10 @@ where
         }
     }
 
-    pub fn log_apply(&self, _op: &Op<T>) {
+    pub fn log_apply(&self, op: &Op<T>) {
         #[cfg(feature = "logging-list")]
         {
-            if _op.is_deleted {
+            if op.is_deleted {
                 println!(
                     "{} Performing a delete of {}@{}",
                     display_author(self.our_id),
@@ -305,14 +302,16 @@ where
                 return;
             }
 
-            println!(
-                "{} Performing an insert of {}@{}: '{}' after {}",
-                display_author(self.our_id),
-                display_op_id(op),
-                op.sequence_num(),
-                op.content.as_ref().unwrap().hash(),
-                display_op_id(op)
-            );
+            if let Some(content) = op.content.as_ref() {
+                println!(
+                    "{} Performing an insert of {}@{}: '{}' after {}",
+                    display_author(self.our_id),
+                    display_op_id(op),
+                    op.sequence_num(),
+                    content.hash(),
+                    display_op_id(op)
+                );
+            }
         }
     }
 }

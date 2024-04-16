@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["lib"]
 
 [features]
-default = ["bft"]
+default = ["bft", "logging-list", "logging-json"]
 logging-list = ["logging-base"]
 logging-json = ["logging-base"]
 logging-base = []
